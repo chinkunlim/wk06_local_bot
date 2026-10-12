@@ -37,6 +37,20 @@
 - 預設模型更新為 `llama3.1` (Function Calling 更穩定)
 
 ---
+## [1.0.2] - 2026-10-12
+
+### 修復
+- **修復 Telegram Long Polling 衝突問題**：解決 `Conflict: terminated by other getUpdates request` 錯誤，根因是多個 bot 實例同時輪詢
+- **修復 DuckDuckGo 搜尋失效**：移除 `Accept-Encoding: br` (Brotli) 避免解壓失敗，簡化 CSS 選擇器為 `.result__body` 避免重複解析
+- **修復 Google News XML 實體解碼**：修正 `decode_xml_entities` 中的智慧引號處理 (`\u2018`, `\u2019`, `\u201c`, `\u201d`)
+- **修復 Markdown 解析器衝突**：使用 placeholder 保護策略，避免程式碼區塊被斜體/粗體規則誤處理
+- **修復 `search_sync` event loop 衝突**：使用 `ThreadPoolExecutor` 隔離執行避免 `RuntimeError: This event loop is already running`
+
+### 新增
+- 完善除錯日誌：新增 `_debug_log` 輔助函數，追蹤 handler 註冊、polling 啟動、訊息處理流程
+- 完善測試套件：`test/` 目錄新增 `test_settings.py`, `test_search.py`, `test_markdown.py`, `test_ollama.py`, `test_conversation.py`, `test_settings.py`, `run_all.py`
+
+---
 
 ## 版本規劃
 

@@ -282,7 +282,111 @@ print([m['name'] for m in models])
 cat data/quota/quota.json | jq
 ```
 
+### 6. 測試搜尋模組
+```bash
+# 測試 DuckDuckGo 搜尋
+uv run python -c "
+from search import search
+import asyncio
+r = asyncio.run(search('台灣 天氣', max_results=3))
+print(f'結果: {len(r)} 筆')
+for r in r:
+    print(f'  - {r[\"title\"][:60]}')
+"
+
+# 測試 Google News 搜尋
+uv run python -c "
+from search import search
+import asyncio
+r = asyncio.run(search('台灣 天氣', max_results=3, engine='google_news'))
+print(f'結果: {len(r)} 筆')
+"
+
+# 測試搜尋同步版本
+uv run python -c "
+from search import search_sync
+r = search_sync('台灣 天氣', max_results=3)
+print(f'同步搜尋: {len(r)} 筆')
+"
+```
+
+### 7. 測試模型工具呼叫
+```bash
+uv run python -c "
+from llm.ollama_client import get_ollama_client, SEARCH_TOOL
+import asyncio
+
+async def test():
+    c = get_ollama_client()
+    resp = await c.chat_with_tools(
+        messages=[{'role': 'user', 'content': '台灣今天天氣如何？'}],
+        tools=[SEARCH_TOOL],
+        tool_choice='auto'
+    )
+    print('回應:', resp)
+
+asyncio.run(test())
+"
+```
+
+### 8. 測試 Markdown 解析器
+```bash
+uv run python -c "
+from bot.handler import markdown_to_html
+
+# 測試粗體
+print(markdown_to_html('**粗體**'))
+
+# 測試斜體
+print(markdown_to_html('*斜體*'))
+
+# 測試程式碼
+print(markdown_to_html('\`行內程式碼\`'))
+
+# 測試程式碼區塊
+print(markdown_to_html('\`\`\`python\nprint(\"hello\")\n\`\`\`'))
+
+# 測試連結
+print(markdown_to_html('[連結](https://example.com)'))
+
+# 測試混合
+print(markdown_to_html('**粗體** 和 *斜體*'))
+"
+```
+
+### 9. 清理 Telegram 衝突
+```bash
+# 強制停止所有 bot 實例並清理
+pkill -f "bot.main" && pkill -f "uv run"
+
+# 清理 Telegram pending updates
+uv run python -c "
+import httpx, asyncio
+from config.settings import settings
+async def clear():
+    url = f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/deleteWebhook'
+    async with httpx.AsyncClient() as c:
+        await c.post(url, params={'drop_pending_updates': True})
+    url2 = f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getUpdates'
+    async with httpx.AsyncClient() as c:
+        await c.get(url2, params={'offset': -1})
+asyncio.run(clear())
+"
+```
+
+### 10. 常見問題快速診斷
+| 症狀 | 可能原因 | 解決方案 |
+|------|----------|----------|
+| `Conflict: terminated by other getUpdates request` | 多實例運行或殘留 pending updates | 執行 `pkill -f "bot.main"` 並清理 webhook |
+| DuckDuckGo 搜尋 0 結果 | Brotli 解壓失敗或選擇器重複 | 更新 `search/duckduckgo.py` (移除 br, 簡化 selector) |
+| Google News 語法錯誤 | 智慧引號語法錯誤 | 更新 `search/google_news.py` 的 `decode_xml_entities` |
+| Markdown 顯示異常 (粗體/程式碼異常) | 解析器衝突 | 更新 `bot/handler.py` 的 `markdown_to_html` |
+| `RuntimeError: This event loop is already running` | event loop 衝突 | 更新 `search/__init__.py` 的 `search_sync` 使用 ThreadPoolExecutor |
+| 搜尋同步版本卡住 | event loop 衝突 | 更新 `search/__init__.py` 使用 ThreadPoolExecutor |
+
 ---
+
+## 📝 程式碼風格規範
 
 ## 📝 程式碼風格規範
 

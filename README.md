@@ -12,6 +12,8 @@
 - 💾 **本地持久化** - 對話歷史、配額、日誌皆存 JSON 檔案
 - ⚡ **漸進式回覆** - 思考中 → 搜尋中 → 整理中 → 完成
 - 📦 **uv 專案管理** - 極速依賴解析、Python 版本自動管理、單一鎖定檔
+- 🧪 **完整測試套件** - 內建搜尋、Markdown、Ollama、對話、設定等單元測試
+- 🐛 **完善除錯日誌** - 內建 DEBUG 等級日誌追蹤 handler 註冊、polling、訊息處理流程
 
 ## 🚀 快速開始
 
@@ -124,6 +126,16 @@ wk06_bot_local/
 │   ├── __init__.py           # 搜尋引擎工廠
 │   ├── duckduckgo.py         # DuckDuckGo HTML 搜尋
 │   └── google_news.py        # Google News RSS 搜尋
+├── test/                     # 測試套件
+│   ├── __init__.py
+│   ├── run_all.py            # 統一測試執行器
+│   ├── test_settings.py      # 設定測試
+│   ├── test_search.py        # 搜尋測試
+│   ├── test_markdown.py      # Markdown 解析測試
+│   ├── test_ollama.py        # Ollama 測試
+│   ├── test_conversation.py  # 對話/配額測試
+│   ├── test_settings.py      # 設定測試
+│   └── README.md             # 測試說明
 ├── data/                     # 執行時自動建立
 │   ├── cache/history/        # 對話歷史 (JSON)
 │   ├── quota/                # 配額記錄 (JSON)
@@ -240,16 +252,38 @@ ollama pull llama3.1
 # .env: OLLAMA_MODEL=llama3.1
 ```
 
-## 📄 授權
+### Q: Telegram 出現 `Conflict: terminated by other getUpdates request` 錯誤？
+A: 這是多實例衝突 (ISSUE-015)。解決方法：
+```bash
+# 1. 強制清理所有 bot 實例
+pkill -f "bot.main" && pkill -f "uv run"
 
-MIT License - 自由使用、修改、分發
+# 2. 清理 Telegram pending updates
+uv run python -c "
+import httpx, asyncio
+from config.settings import settings
+async def clear():
+    url = f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/deleteWebhook'
+    params = {'drop_pending_updates': True}
+    async with httpx.AsyncClient() as client:
+        await client.post(url, params=params)
+    url2 = f'https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getUpdates'
+    async with httpx.AsyncClient() as client:
+        await client.get(url2, params={'offset': -1})
+asyncio.run(clear())
+"
+```
 
----
+### Q: DuckDuckGo 搜尋回傳 0 結果？
+A: 這是 ISSUE-016，已在 v1.0.2 修復。確保已更新 `search/duckduckgo.py`：
+- 移除 `Accept-Encoding: br` (避免 Brotli 解壓失敗)
+- 選擇器簡化為 `.result__body` (避免重複)
 
-## 📚 相關文件
+### Q: Google News 搜尋語法錯誤？
+A: 這是 ISSUE-017，已在 v1.0.2 修復 `search/google_news.py` 的 `decode_xml_entities` 函數。
 
-- [變更記錄](CHANGELOG.md)
-- [架構決策](DECISIONS.md)
-- [已知問題](KNOWN_ISSUES.md)
-- [開發流程](WORKFLOW_GUIDE.md)
-- [Agent 指南](AGENTS.md)
+### Q: Markdown 粗體/斜體/程式碼顯示異常？
+A: 這是 ISSUE-018，已在 v1.0.2 修復 `bot/handler.py` 的 `markdown_to_html` 函數。
+
+### Q: `search_sync` 出現 `RuntimeError: This event loop is already running`？
+A: 這是 ISSUE-019，已在 v1.0.2 修復 `search/__init__.py` 的 `search_sync` 函數，使用 `ThreadPoolExecutor` 隔離執行。

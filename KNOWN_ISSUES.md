@@ -19,13 +19,39 @@
 **修復**: 移除 `load_quota_data` 和 `save_quota_data` 內部鎖，由呼叫者 `check_and_consume_quota` 統一控制鎖。
 **狀態**: ✅ **已修復** (v1.0.1)
 
-### ISSUE-002: DuckDuckGo HTML 抓取易失效
-**現象**: 模型有時不呼叫搜尋工具、或呼叫後無法正確解析結果、或產生幻覺工具呼叫。
-**原因**: qwen2.5 的工具呼叫能力不如 llama3.1/nemotron3-ultra 成熟。
-**規避**:
-- 修改 `.env`: `OLLAMA_MODEL=llama3.1` 並執行 `ollama pull llama3.1`
-- 或 `OLLAMA_MODEL=nemotron3-ultra` (需大顯存)
-- 在 System Prompt 加強工具使用指引
+### ISSUE-015: Telegram Long Polling 衝突 (已修復)
+**現象**: `Conflict: terminated by other getUpdates request; make sure that only one bot instance is running`
+**原因**: 多個 bot 實例同時運行輪詢，或未正確清理 webhook/pending updates
+**修復**: 
+- 啟動前呼叫 `deleteWebhook(drop_pending_updates=True)`
+- 確保單一實例運行 (`pkill -f "bot.main"`)
+- 使用 `drop_pending_updates=False` 避免重複清理
+**狀態**: ✅ **已修復** (v1.0.2)
+
+### ISSUE-016: DuckDuckGo 搜尋回傳 0 結果 (已修復)
+**現象**: 搜尋關鍵字正確但回傳 0 筆結果
+**原因**: 
+1. `Accept-Encoding: br` (Brotli) 導致回應未正確解壓
+2. CSS 選擇器 `.result__body, .web-result, .result` 導致重複選取，去重邏輯失效
+**修復**:
+1. 移除 `Accept-Encoding: br`，改用 `gzip, deflate`
+2. 簡化選擇器為 `.result__body` 避免重複
+**狀態**: ✅ **已修復** (v1.0.2)
+
+### ISSUE-017: Google News XML 實體解碼錯誤 (已修復)
+**現象**: `decode_xml_entities` 語法錯誤，智慧引號導致語法錯誤
+**修復**: 重寫 `decode_xml_entities` 使用 Unicode escape sequences
+**狀態**: ✅ **已修復** (v1.0.2)
+
+### ISSUE-018: Markdown 解析器衝突 (已修復)
+**現象**: 粗體 `**bold**` 顯示為 `**`，inline code 被斜體規則誤處理
+**修復**: 重寫 `markdown_to_html` 使用 placeholder 保護策略
+**狀態**: ✅ **已修復** (v1.0.2)
+
+### ISSUE-019: `search_sync` event loop 衝突 (已修復)
+**現象**: `RuntimeError: This event loop is already running`
+**修復**: 使用 `ThreadPoolExecutor` 隔離執行
+**狀態**: ✅ **已修復** (v1.0.2)
 
 ### ISSUE-002: DuckDuckGo HTML 抓取易失效
 **現象**: 搜尋回傳空結果、或被導向驗證頁面 (CAPTCHA)。
@@ -111,7 +137,12 @@
 |----|------|--------|------|----------|--------|
 | 001 | qwen2.5 Function Calling 穩定性 | 🔴 高 | ✅ **已解決** (切換 llama3.1) | 1.0.1 | - |
 | 014 | 配額檢查死鎖 | 🔴 高 | ✅ **已修復** | 1.0.1 | - |
-| 002 | DuckDuckGo 抓取易失效 | 🔴 高 | 規避中 | 1.1.0 | - |
+| 015 | Telegram Long Polling 衝突 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
+| 016 | DuckDuckGo 搜尋回傳 0 結果 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
+| 017 | Google News XML 實體解碼錯誤 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
+| 018 | Markdown 解析器衝突 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
+| 019 | search_sync event loop 衝突 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
+| 002 | DuckDuckGo HTML 抓取易失效 | 🔴 高 | 規避中 | 1.1.0 | - |
 | 003 | Context Window 溢位 | 🔴 高 | 監控中 | 1.1.0 | - |
 | 004 | 無串流回覆 | 🟡 中 | 規劃中 | 1.2.0 | - |
 | 005 | 單執行緒阻塞 | 🟡 中 | 接受中 | 1.2.0 | - |

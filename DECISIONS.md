@@ -190,6 +190,103 @@ ollama pull command-r            # 專為 RAG/工具設計
 
 ---
 
+## ADR-009: 修復 Telegram Long Polling 衝突問題
+
+**日期**: 2026-10-12
+**狀態**: Accepted
+
+### 背景
+啟動 bot 時出現 `Conflict: terminated by other getUpdates request` 錯誤，導致無法正常輪詢。
+
+### 決策
+實作三層防護機制：
+1. 啟動時呼叫 `deleteWebhook(drop_pending_updates=True)` 清理殘留更新
+2. 確保單一實例運行 (`pkill -f "bot.main"`)
+3. 使用 `drop_pending_updates=False` 避免重複清理
+
+### 理由
+- 避免多實例同時輪詢導致 Telegram 伺服器終止連線
+- 確保啟動前環境乾淨，無殘留 pending updates
+
+---
+
+## ADR-010: 修復 DuckDuckGo 搜尋回傳 0 結果
+
+**日期**: 2026-10-12
+**狀態**: Accepted
+
+### 背景
+DuckDuckGo HTML 搜尋回傳 0 筆結果，雖然直接測試有結果但模組內部回傳 0。
+
+### 決策
+雙重修復：
+1. 移除 `Accept-Encoding: br` (Brotli)，改用 `gzip, deflate` 避免解壓失敗
+2. 簡化 CSS 選擇器從 `.result__body, .web-result, .result` 改為 `.result__body`，避免重複選取導致去重邏輯失效
+
+### 理由
+- Brotli 壓縮在某些環境下無法正確解壓，導致 HTML 解析失敗
+- 多重選擇器導致重複元素，去重邏輯異常導致結果被過濾
+
+---
+
+## ADR-011: 修復 Google News XML 實體解碼錯誤
+
+**日期**: 2026-10-12
+**狀態**: Accepted
+
+### 背景
+`decode_xml_entities` 函數中的智慧引號字元導致 Python 語法錯誤。
+
+### 決策
+重寫 `decode_xml_entities` 使用 Unicode escape sequences (`\u2018`, `\u2019`, `\u201c`, `\u201d`) 替代字面字元。
+
+### 理由
+- 智慧引號在 Python 字串字面值中會導致語法錯誤
+- Unicode escape sequences 更安全、可移植
+
+---
+
+## ADR-012: 修復 Markdown 解析器衝突
+
+**日期**: 2026-10-12
+**狀態**: Accepted
+
+### 背景
+Markdown 解析器中 inline code (`code`) 被斜體規則誤處理，導致 `__INLINE<i>CODE</i>0__` 等異常輸出。
+
+### 決策
+重寫 `markdown_to_html` 採用 **placeholder 保護策略**：
+1. 階段 0: 保護所有特殊標記 (程式碼區塊、行內程式碼、HTML 標籤) 為 placeholder
+2. 階段 1: HTML 跳脫
+3. 階段 2: 處理 Markdown 語法 (粗體、斜體、標題、列表、連結)
+4. 階段 3: 還原受保護內容並轉換為 HTML
+
+### 理由
+- 保護優先策略確保特殊內容不被後續規則誤處理
+- 統一保護/還原機制簡化邏輯，避免正則表達式衝突
+
+---
+
+## ADR-013: 修復 `search_sync` event loop 衝突
+
+**日期**: 2026-10-12
+**狀態**: Accepted
+
+### 背景
+`search_sync` 在已有 event loop 執行時拋出 `RuntimeError: This event loop is already running`。
+
+### 決策
+使用 `ThreadPoolExecutor` 隔離執行：
+- Python 3.12+ 使用 `asyncio.get_running_loop()` 檢測
+- Python 3.11 及以下使用 `asyncio.get_event_loop()` + `is_running()` 檢測
+- 已在 loop 中時，提交到執行緒池執行 `asyncio.run()`
+
+### 理由
+- 避免在已有 event loop 中巢狀呼叫 `asyncio.run()`
+- 執行緒池隔離確保事件循環獨立
+
+---
+
 ## 更新決策記錄
 
 新增 ADR 格式：

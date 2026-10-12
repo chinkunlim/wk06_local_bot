@@ -198,6 +198,7 @@ class BotHandler:
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """啟動指令"""
+        logger.info(f'[DEBUG] cmd_start called by user {update.effective_user.id}')
         user = update.effective_user
         welcome = (
             f'👋 <b>歡迎使用本地 AI 助理！</b>\n\n'
@@ -333,6 +334,7 @@ class BotHandler:
         is_search_command: bool = False,
     ):
         """處理使用者查詢 (含工具呼叫循環)"""
+        _debug_log(f'[DEBUG] _process_query started: query={user_query[:50]}')
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username or '匿名'
         
@@ -341,6 +343,7 @@ class BotHandler:
         
         # 取得對話歷史
         history = get_conversation_history(user_id)
+        _debug_log(f'[DEBUG] History length: {len(history)}')
         
         # 構建訊息
         messages = [{'role': 'system', 'content': SYSTEM_PROMPT}]
@@ -352,19 +355,23 @@ class BotHandler:
         tool_results = []
         
         for round_num in range(max_tool_rounds):
+            _debug_log(f'[DEBUG] Tool round {round_num + 1}')
             # 呼叫 LLM
             response = await self.ollama_client.chat_with_tools(
                 messages=messages,
                 tools=[SEARCH_TOOL],
                 tool_choice='auto',
             )
+            _debug_log(f'[DEBUG] LLM response: {response}')
             
             message = response.get('message', {})
             tool_calls = message.get('tool_calls', [])
+            _debug_log(f'[DEBUG] Tool calls: {tool_calls}')
             
             if not tool_calls:
                 # 沒有工具呼叫，直接回覆
                 assistant_reply = message.get('content', '').strip()
+                _debug_log(f'[DEBUG] No tool calls, reply: {assistant_reply[:100] if assistant_reply else "empty"}')
                 if assistant_reply:
                     await self._finalize_response(
                         update, user_id, user_name, user_query,
@@ -387,10 +394,11 @@ class BotHandler:
                 
                 if func_name == 'search_web':
                     query = func_args.get('query', '')
-                    logger.info(f'🔧 模型呼叫搜尋: "{query}"')
+                    _debug_log(f'[DEBUG] Model calling search: "{query}"')
                     
                     # 執行搜尋
                     results = await search(query, settings.SEARCH_MAX_RESULTS)
+                    _debug_log(f'[DEBUG] Search results count: {len(results)}')
                     formatted = format_results(results)
                     
                     tool_results.append({
@@ -480,10 +488,13 @@ class BotHandler:
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理一般文字訊息"""
+        print(f'[DEBUG] handle_message called: user_id={update.effective_user.id}, text={update.message.text[:50] if update.message.text else "empty"}')
+        _debug_log(f'[DEBUG] handle_message called: user_id={update.effective_user.id}, text={update.message.text[:50] if update.message.text else "empty"}')
         user_id = update.effective_user.id
         
         # 檢查授權
         if not is_user_authorized(user_id):
+            _debug_log(f'[DEBUG] User {user_id} not authorized')
             await update.message.reply_text(
                 f'⛔ <b>存取受限</b>\n\n'
                 f'抱歉，您尚未加入授權白名單。\n'
@@ -496,17 +507,22 @@ class BotHandler:
         # 檢查額度
         quota = check_and_consume_quota(user_id)
         if not quota['allowed']:
+            _debug_log(f'[DEBUG] User {user_id} quota exceeded')
             await self.send_error(update, quota['message'])
             return
         
         # 處理查詢
         user_query = update.message.text.strip()
+        _debug_log(f'[DEBUG] Processing query: {user_query[:50]}')
         await self._process_query(update, user_query, quota)
 
 
 # 全域處理器實例
 bot_handler = BotHandler()
 
+def _debug_log(msg):
+    import logging
+    logging.getLogger(__name__).info(f'[DEBUG] {msg}')
 
 async def setup_bot() -> Application:
     """建立並設定 Telegram Bot Application"""
@@ -517,6 +533,7 @@ async def setup_bot() -> Application:
     application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
     
     # 註冊指令
+    _debug_log('Registering handlers...')
     application.add_handler(CommandHandler('start', bot_handler.cmd_start))
     application.add_handler(CommandHandler('help', bot_handler.cmd_help))
     application.add_handler(CommandHandler('status', bot_handler.cmd_status))
@@ -527,5 +544,7 @@ async def setup_bot() -> Application:
     
     # 註冊一般訊息處理
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot_handler.handle_message))
+    
+    _debug_log('Handlers registered successfully')
     
     return application

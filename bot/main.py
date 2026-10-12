@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 async def main():
     """主程式"""
     from config.settings import settings
-    from bot.handler import setup_bot
+    from bot.handler import bot_handler, setup_bot, _debug_log
     
     # 驗證設定
     errors = settings.validate()
@@ -66,10 +66,12 @@ async def main():
     
     try:
         # 開始 polling
+        _debug_log('Starting polling...')
         await application.updater.start_polling(
             allowed_updates=['message', 'callback_query'],
-            drop_pending_updates=True,
+            drop_pending_updates=False,
         )
+        _debug_log('Polling started successfully')
         
         # 保持運行
         while True:
