@@ -172,21 +172,19 @@ def clean_html(html: str) -> str:
 def decode_xml_entities(text: str) -> str:
     """解碼 XML/HTML 實體"""
     if not text:
-        return ''
+        return ""
     return (text
-        .replace('&', '&')
-        .replace('<', '<')
-        .replace('>', '>')
+        .replace("&", "&")
+        .replace("<", "<")
+        .replace(">", ">")
         .replace('"', '"')
-        .replace(''', "'")
-        .replace('&nbsp;', ' ')
-        .replace('&#8230;', '…')
-        .replace('&#8217;', "'")
-        .replace('&#8220;', '"')
-        .replace('&#8221;', '"')
+        .replace("‘", "'")
+        .replace("&nbsp;", " ")
+        .replace("&#8230;", "...")
+        .replace("&#8217;", "'")
+        .replace("&#8220;", '"')
+        .replace("&#8221;", '"')
     )
-
-
 def format_search_results(results: List[Dict]) -> str:
     """格式化搜尋結果給 LLM"""
     if not results:

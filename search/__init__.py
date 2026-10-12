@@ -66,9 +66,27 @@ def format_results(results: List[Dict], engine: str = None) -> str:
 # 同步版本
 def search_sync(query: str, max_results: int = None, engine: str = None) -> List[Dict]:
     import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(search(query, max_results, engine))
+    import sys
+    if sys.version_info >= (3, 12):
+        # Python 3.12+ 使用 asyncio.run
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(search(query, max_results, engine))
+        # 已經在 loop 中，建立新 task
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, search(query, max_results, engine))
+            return future.result()
+    else:
+        # Python 3.11 及以下
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, search(query, max_results, engine))
+                    return future.result()
+        except RuntimeError:
+            pass
+        return asyncio.run(search(query, max_results, engine))

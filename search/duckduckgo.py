@@ -22,7 +22,7 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Encoding': 'gzip, deflate',  # 移除 br (Brotli) 避免解壓失敗
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
 }
@@ -98,23 +98,11 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
         follow_redirects=True
     ) as client:
         try:
-            # 先取得 token (DuckDuckGo 需要先 POST 取得 vqd token)
+            # DuckDuckGo HTML 版：直接 POST 取得結果
             response = await client.post(
                 DDG_HTML_URL,
                 data={'q': keywords, 'kl': 'tw-tw'},
             )
-            
-            # 從回應中提取 vqd token
-            vqd_match = re.search(r'vqd=([\d-]+)&', response.text)
-            if not vqd_match:
-                # 嘗試直接用 GET 參數
-                response = await client.get(DDG_LITE_URL, params=params)
-            else:
-                vqd = vqd_match.group(1)
-                response = await client.get(
-                    'https://duckduckgo.com/html/',
-                    params={**params, 'vqd': vqd}
-                )
             
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -122,7 +110,8 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
             results = []
             
             # 解析結果 - DuckDuckGo HTML 版的結構
-            for result_div in soup.select('.result__body, .web-result, .result'):
+            # 只使用 .result__body 避免重複選擇
+            for result_div in soup.select('.result__body'):
                 # 標題與連結
                 title_elem = result_div.select_one('.result__title a, .result__url a, h2 a, .title a')
                 snippet_elem = result_div.select_one('.result__snippet, .snippet, .result__excerpt')

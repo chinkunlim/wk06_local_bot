@@ -34,6 +34,85 @@ from llm.ollama_client import (
 )
 from search import search, format_results
 
+
+def markdown_to_html(text: str) -> str:
+    """將 Markdown 轉換為 Telegram 支援的 HTML"""
+    if not text:
+        return ''
+    
+    import re
+    
+    # ===== 階段 0: 保護所有特殊標記 =====
+    protected = {}
+    prot_id = 0
+    
+    def protect(match):
+        nonlocal prot_id
+        key = f'__PROTECTED_{prot_id}__'
+        prot_id += 1
+        protected[key] = match.group(0)
+        return key
+    
+    # 保護程式碼區塊
+    text = re.sub(r'```[\s\S]*?```', protect, text)
+    # 保護行內程式碼
+    text = re.sub(r'`[^`\n]+`', protect, text)
+    # 保護已有的 HTML 標籤
+    text = re.sub(r'<[^>]+>', protect, text)
+    
+    # ===== 階段 1: HTML 跳脫 =====
+    text = text.replace('&', '&').replace('<', '<').replace('>', '>')
+    
+    # ===== 階段 2: 處理 Markdown =====
+    # 粗體 **text** (處理未閉合)
+    bold_count = text.count('**')
+    if bold_count % 2 != 0:
+        text += '**'
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    
+    # 斜體 *text* 或 _text_
+    text = re.sub(r'(^|[^\*])\*([^\*\n]+)\*([^\*]|$)', r'\1<i>\2</i>\3', text)
+    text = re.sub(r'(^|[^_])_([^_\n]+)_([^_]|$)', r'\1<i>\2</i>\3', text)
+    
+    # 標題 # text -> <b>text</b>
+    text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    
+    # 項目符號 - 或 * 開頭
+    text = re.sub(r'^[\*\-\+]\s+(.+)$', r'• \1', text, flags=re.MULTILINE)
+    
+    # 分割線
+    text = re.sub(r'^---+$', '──────────────', text, flags=re.MULTILINE)
+    
+    # 超連結 [text](url)
+    text = re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', r'<a href="\2">\1</a>', text)
+    
+    # ===== 階段 2: 還原受保護內容 =====
+    def restore_protected(match):
+        key = match.group(0)
+        if key in protected:
+            content = protected[key]
+            # 程式碼區塊
+            if content.startswith('```') and content.endswith('```'):
+                code = content[3:-3]
+                # 移除語言指定符
+                lines = code.split('\n')
+                if lines and lines[0].strip() and ' ' not in lines[0].strip():
+                    code = '\n'.join(lines[1:])
+                escaped = code.replace('&', '&').replace('<', '<').replace('>', '>')
+                return f'<pre><code>{escaped.strip()}</code></pre>'
+            # 行內程式碼
+            if content.startswith('`') and content.endswith('`'):
+                code = content[1:-1]
+                escaped = code.replace('&', '&').replace('<', '<').replace('>', '>')
+                return f'<code>{escaped}</code>'
+            # HTML 標籤直接還原
+            return content
+        return key
+    
+    text = re.sub(r'__PROTECTED_\d+__', restore_protected, text)
+    
+    return text
+
 logger = logging.getLogger(__name__)
 
 
@@ -379,7 +458,9 @@ class BotHandler:
         # 加上額度資訊
         footer = f'\n\n<i>(本日已提問: {quota["current"]}/{quota["max"]})</i>'
         
-        final_text = assistant_reply + sources_text + footer
+        # 轉換 Markdown 為 HTML
+        formatted_reply = markdown_to_html(assistant_reply)
+        final_text = formatted_reply + sources_text + footer
         
         # 發送最終回覆
         await self.send_final_response(update, final_text)
