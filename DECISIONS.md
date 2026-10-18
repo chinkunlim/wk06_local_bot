@@ -320,6 +320,36 @@ Markdown 解析器中 inline code (`code`) 被斜體規則誤處理，導致 `__
 
 ---
 
+## ADR-015: 搜尋後讀取網頁內文、備援改用 ddgs 多引擎
+
+**日期**: 2026-10-18
+**狀態**: Accepted
+
+### 背景
+測試「東華大學通識中心、資工的陳文盛老師開哪些課」：
+- 只給模型搜尋摘要 (一兩句)，回答只列出 1 門課，其餘「未知名稱」；但老師個人頁的「開設課程」段落有完整清單
+- router 規則未涵蓋「特定人物/單位的具體資料」，有時不搜尋而直接編造課程
+- DuckDuckGo 被限流時備援 Google News 只有新聞，這類問題只得到 1 則無關新聞
+
+### 決策
+1. router / tools 規則加入「特定人物、學校、公司、店家、產品的具體資料」與「使用者明確要求查詢」
+2. 新增 `search/page_fetch.py`：讀取前 `SEARCH_FETCH_PAGES` (預設 2) 筆結果網頁，依問題關鍵字 (含 2-gram) 挑選命中行及其後 3 行，摘錄至 `SEARCH_PAGE_CHARS` (預設 1500) 字
+3. 新增 `search/multi_engine.py` (ddgs 套件)，`SEARCH_FALLBACK_ENGINE` 預設改為 `ddgs`
+4. router 模式的回答階段 system prompt 不再描述 `search_web` (無工具可用時小模型會拒答)
+
+### 理由
+- 內文摘錄而非全文：頁首選單常佔前段，關鍵字挑選能在有限 context 內保留「開設課程」這類段落
+- ddgs 免 API Key、自動切換 Bing/Brave/Google/Mojeek/Yahoo 等引擎，實測 Brave 429、Google 403 時仍由 Mojeek/Yahoo 取得正確結果
+- 不採用付費/需金鑰 API (Tavily、Brave API) 以維持零 API Key 原則；SearXNG 需 Docker，留待日後
+
+### 後果
+- 需搜尋的問題多 1~3 秒讀取網頁
+- 新增依賴 `ddgs` (含 `primp`、`lxml`)
+- 各引擎皆為網頁抓取，大量請求仍可能被限流
+- 摘錄依關鍵字命中，若網頁用詞與問題差異大可能漏掉段落
+
+---
+
 ## 更新決策記錄
 
 新增 ADR 格式：

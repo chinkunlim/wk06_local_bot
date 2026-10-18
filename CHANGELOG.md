@@ -73,6 +73,11 @@
 - **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復模型每題都搜尋、照抄搜尋結果**：新增 `SEARCH_DECISION` (預設 `router`)，模型先輸出 JSON 判斷是否需要搜尋；system prompt 改為預設直接回答並加入今日日期 (ADR-014)
 - **修復翻譯題不翻譯、計算不穩定**：system prompt 允許依要求輸出其他語言；回答 temperature 0.7 → 0.3
+- **搜尋後讀取網頁內文**：讀取前 2 筆結果網頁，依問題關鍵字摘錄相關段落給模型，回答更完整 (`SEARCH_FETCH_PAGES`、`SEARCH_PAGE_CHARS`)
+- **新增 ddgs 多引擎搜尋**並設為預設備援 (`SEARCH_FALLBACK_ENGINE=ddgs`)，取代只有新聞的 Google News
+- **修復查詢特定人物/單位時不搜尋而編造**：router 與工具規則加入「特定對象的具體資料」「使用者要求查詢」
+- **修復 router 模式拒答**：回答階段 system prompt 不再描述無法使用的 `search_web`
+- **改善心算**：要求逐步列出計算過程 (仍不穩定，見 ISSUE-020)
 - **DuckDuckGo 被封鎖時自動備援**：偵測機器人驗證頁 (HTTP 202 / anomaly) 後冷卻 10 分鐘，主引擎無結果時改用 `SEARCH_FALLBACK_ENGINE` (預設 `google_news`)；`format_results` 依結果來源引擎選擇格式
 - **新增端對端輸出測試** `test/e2e_bot.py`：真實 Ollama + 搜尋跑完整流程，檢查搜尋判斷、HTML 合法性、禁用字樣，報告寫入 `logs/e2e_report.md`
 - **修復 OllamaClient 換 event loop 失效**：偵測 loop 變更時重建 httpx 連線池

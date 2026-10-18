@@ -24,6 +24,11 @@ SEARCH_ENGINES = {
         'search': None,
         'format': None,
     },
+    'ddgs': {
+        'name': 'ddgs 多引擎',
+        'search': None,
+        'format': None,
+    },
 }
 
 
@@ -40,6 +45,12 @@ def _load_engines():
         from search.google_news import search_google_news
         SEARCH_ENGINES['google_news']['search'] = search_google_news
         SEARCH_ENGINES['google_news']['format'] = fmt_gn
+
+    if SEARCH_ENGINES['ddgs']['search'] is None:
+        from search.multi_engine import format_search_results as fmt_multi
+        from search.multi_engine import search_ddgs
+        SEARCH_ENGINES['ddgs']['search'] = search_ddgs
+        SEARCH_ENGINES['ddgs']['format'] = fmt_multi
 
 
 def _resolve_engine_name(engine_name: str = None) -> str:

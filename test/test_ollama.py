@@ -45,7 +45,7 @@ async def test_chat_with_tools():
     client = get_ollama_client()
     response = await client.chat_with_tools(
         messages=[
-            {'role': 'system', 'content': build_system_prompt()},
+            {'role': 'system', 'content': build_system_prompt('tools')},
             {'role': 'user', 'content': '台灣今天天氣如何？'}
         ],
         tools=[SEARCH_TOOL],

@@ -11,7 +11,7 @@ env_path = Path(__file__).parent.parent / '.env'
 if env_path.exists():
     load_dotenv(env_path)
 
-SUPPORTED_SEARCH_ENGINES = ('duckduckgo', 'google_news')
+SUPPORTED_SEARCH_ENGINES = ('duckduckgo', 'google_news', 'ddgs')
 SUPPORTED_SEARCH_DECISIONS = ('router', 'tools')
 
 
@@ -52,9 +52,13 @@ class Settings:
     OLLAMA_NUM_CTX: int = int(os.getenv('OLLAMA_NUM_CTX', '8192'))
 
     # === 搜尋設定 ===
-    SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news
+    SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news | ddgs
     # 主引擎無結果或被封鎖時的備援引擎；設為空字串則停用
-    SEARCH_FALLBACK_ENGINE: str = os.getenv('SEARCH_FALLBACK_ENGINE', 'google_news')
+    SEARCH_FALLBACK_ENGINE: str = os.getenv('SEARCH_FALLBACK_ENGINE', 'ddgs')
+    # 搜尋後讀取前 N 筆結果的網頁內文給模型 (0 = 只用搜尋摘要)
+    SEARCH_FETCH_PAGES: int = int(os.getenv('SEARCH_FETCH_PAGES', '2'))
+    # 每頁內文摘錄上限字數 (受 OLLAMA_NUM_CTX 限制，過大會擠掉對話歷史)
+    SEARCH_PAGE_CHARS: int = int(os.getenv('SEARCH_PAGE_CHARS', '1500'))
     SEARCH_MAX_RESULTS: int = int(os.getenv('SEARCH_MAX_RESULTS', '4'))
     SEARCH_TIMEOUT: int = int(os.getenv('SEARCH_TIMEOUT', '15'))  # 秒
     # 搜尋判斷方式：

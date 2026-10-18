@@ -26,6 +26,7 @@ def check_dependencies():
         'httpx',
         'dotenv',
         'bs4',
+        'ddgs',
     ]
 
     missing = []

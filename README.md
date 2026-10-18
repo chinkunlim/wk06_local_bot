@@ -164,6 +164,16 @@ SEARCH_ENGINE=duckduckgo
 SEARCH_ENGINE=google_news
 ```
 
+### 搜尋來源與網頁內文
+```env
+# DuckDuckGo 無結果或被限流時，改用 ddgs 多引擎 (Bing/Brave/Google/Mojeek/Yahoo 自動切換)
+SEARCH_FALLBACK_ENGINE=ddgs
+
+# 搜尋後讀取前 2 筆網頁內文，讓模型能完整回答 (例如老師開的全部課程)
+SEARCH_FETCH_PAGES=2
+SEARCH_PAGE_CHARS=1500
+```
+
 ### 搜尋判斷方式
 ```env
 # 預設：模型先判斷是否需要搜尋 (寫程式、翻譯、常識等直接回答，新聞/天氣/股價才搜)

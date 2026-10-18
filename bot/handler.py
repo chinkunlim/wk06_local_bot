@@ -36,6 +36,7 @@ from llm.ollama_client import (
     init_ollama,
 )
 from search import format_results, search
+from search.page_fetch import enrich_results
 
 logger = logging.getLogger(__name__)
 
@@ -457,6 +458,11 @@ class BotHandler:
             logger.exception(f'搜尋失敗: {query}')
             return '（搜尋失敗，請根據既有知識回答並說明無法取得即時資料）', None
         logger.debug(f'Search results count: {len(results)}')
+        if results and settings.SEARCH_FETCH_PAGES > 0:
+            try:
+                await enrich_results(results, query)
+            except Exception:
+                logger.exception('讀取網頁內文失敗，改用搜尋摘要')
         formatted = format_results(results)
         return formatted, {'query': query, 'results': results, 'formatted': formatted}
 

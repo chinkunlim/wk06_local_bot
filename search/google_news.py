@@ -192,6 +192,8 @@ def format_search_results(results: list[dict]) -> str:
         lines.append(f'網址：{r["url"]}')
         if r.get('description'):
             lines.append(f'摘要：{r["description"]}')
+        if r.get('content'):
+            lines.append(f'內文摘錄：\n{r["content"]}')
 
     return '\n'.join(lines)
 

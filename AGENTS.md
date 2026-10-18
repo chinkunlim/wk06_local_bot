@@ -29,6 +29,8 @@
 | `search/__init__.py` | 搜尋引擎工廠、統一介面 | `search()`, `format_results()`, `get_search_engine()` |
 | `search/duckduckgo.py` | DuckDuckGo HTML 抓取與解析 | `search_duckduckgo()`, `extract_search_keywords()` |
 | `search/google_news.py` | Google News RSS 抓取、相關性過濾 | `search_google_news()`, `filter_relevant_articles()` |
+| `search/multi_engine.py` | ddgs 多引擎搜尋 (備援) | `search_ddgs()` |
+| `search/page_fetch.py` | 讀取結果網頁、依關鍵字摘錄內文 | `enrich_results()`, `extract_relevant_text()` |
 
 ---
 
@@ -213,7 +215,8 @@ print(asyncio.run(search('test')))
 | 需求 | 修改檔案 | 備註 |
 |------|----------|------|
 | 改模型 | `.env` → `OLLAMA_MODEL` | 需 `ollama pull` |
-| 改搜尋引擎 | `.env` → `SEARCH_ENGINE` | `duckduckgo` \| `google_news` |
+| 改搜尋引擎 | `.env` → `SEARCH_ENGINE` / `SEARCH_FALLBACK_ENGINE` | `duckduckgo` \| `google_news` \| `ddgs` |
+| 回答不完整 (只看到摘要) | `.env` → `SEARCH_FETCH_PAGES` / `SEARCH_PAGE_CHARS` | 讀取更多網頁或更長內文，注意 `OLLAMA_NUM_CTX` |
 | 改配額 | `.env` → `MAX_DAILY_REQUESTS` | 重啟生效 |
 | 改對話輪數 | `.env` → `MAX_HISTORY_TURNS` | 重啟生效 |
 | 改上下文長度 | `.env` → `OLLAMA_NUM_CTX` | 預設 8192，越大越吃記憶體 |

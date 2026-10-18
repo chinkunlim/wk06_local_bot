@@ -37,6 +37,8 @@ uv run python test/test_settings.py
 | test_ollama.py | Ollama 連線、模型、對話、工具呼叫 | 非同步 |
 | test_conversation.py | 對話歷史、配額、授權、日誌 | 同步 |
 | test_handler_utils.py | Markdown/分段/關鍵字/錯誤處理/router (離線，mock Ollama) | 非同步 |
+| test_search_fallback.py | DuckDuckGo 封鎖偵測、冷卻、備援引擎 (離線) | 非同步 |
+| test_page_fetch.py | 網頁內文摘錄、ddgs 引擎 (離線) | 非同步 |
 | e2e_bot.py | **端對端輸出測試**：真實 Ollama + 搜尋跑完整流程，檢查是否該搜才搜、HTML 合法、禁用字樣 | 非同步 (非 pytest) |
 
 ## 端對端輸出測試 (e2e_bot.py)

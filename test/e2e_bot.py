@@ -14,6 +14,7 @@
 import argparse
 import asyncio
 import logging
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,13 @@ DEFAULT_CASES = [
     Case('台灣今天天氣如何？', expect_search=True),
     Case('那台北明天呢？', expect_search=True, new_session=False),
     Case('最近有什麼重大科技新聞？', expect_search=True),
+    # 特定人物的具體資料：需搜尋並讀取網頁內文才能完整列出 (同名同姓需依單位辨識)
+    Case(
+        '幫我查找東華大學，通識中心，同時也是資訊工程的陳文盛老師的課。有哪些。',
+        expect_search=True,
+        # 「資訊科技與應用」在原網頁與前一門課僅以空白相連，是否為獨立課程有歧義，不列入必要條件
+        must_contain=['初級程式設計-Python', '中級程式設計-Python'],
+    ),
 ]
 
 # 不應出現在回答中的字樣 (照抄搜尋結果、自行列來源)
@@ -78,6 +86,11 @@ class _TagChecker(HTMLParser):
     def handle_entityref(self, name):
         if name not in ('lt', 'gt', 'amp', 'quot'):
             self.errors.append(f'Telegram 不支援的實體 &{name};')
+
+
+def _normalize(text: str) -> str:
+    """比對預期內容時忽略大小寫、空白、千分位與連字號/括號寫法差異"""
+    return re.sub(r'[\s,\-－–—()（）:：]', '', text).lower()
 
 
 def check_html(text: str) -> list[str]:
@@ -168,9 +181,9 @@ async def run_case(bh, handler_mod, case: Case, index: int) -> Result:
         if word in result.output:
             result.errors.append(f'出現禁用字樣「{word}」')
 
-    normalized = result.output.replace(',', '').lower()
+    normalized = _normalize(result.output)
     for word in case.must_contain:
-        if word.replace(',', '').lower() not in normalized:
+        if _normalize(word) not in normalized:
             result.errors.append(f'缺少預期內容「{word}」')
 
     result.errors.extend(f'HTML: {e}' for e in check_html(result.output))
@@ -215,6 +228,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING, format='  [%(levelname)s] %(name)s: %(message)s')
+    logging.getLogger('ddgs').setLevel(logging.ERROR)
 
     from config.settings import settings
 

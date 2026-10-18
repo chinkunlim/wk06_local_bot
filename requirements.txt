@@ -8,6 +8,9 @@ python-dotenv==1.0.1
 # === HTML 解析 (搜尋用) ===
 beautifulsoup4==4.12.3
 
+# === 多引擎搜尋 (備援) ===
+ddgs>=9.16.0
+
 # === 開發/測試 (選用) ===
 # pytest==8.3.3
 # pytest-asyncio==0.23.7
