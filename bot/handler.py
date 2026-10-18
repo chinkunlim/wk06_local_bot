@@ -31,7 +31,7 @@ from bot.conversation import (
 from config.settings import settings
 from llm.ollama_client import (
     SEARCH_TOOL,
-    SYSTEM_PROMPT,
+    build_system_prompt,
     get_ollama_client,
     init_ollama,
 )
@@ -461,7 +461,7 @@ class BotHandler:
         return formatted, {'query': query, 'results': results, 'formatted': formatted}
 
     async def _run_query(self, update: Update, user_query: str, quota: dict):
-        """工具呼叫循環 + 最終回答"""
+        """搜尋判斷 (router / tools) + 最終回答"""
         logger.debug(f'_process_query started: query={user_query[:50]}')
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username or '匿名'
@@ -474,13 +474,73 @@ class BotHandler:
         logger.debug(f'History length: {len(history)}')
 
         # 構建訊息
-        messages = [{'role': 'system', 'content': SYSTEM_PROMPT}]
+        messages = [{'role': 'system', 'content': build_system_prompt()}]
         messages.extend(history)
         messages.append({'role': 'user', 'content': user_query})
-
-        # 工具呼叫循環 (最多 3 輪)
-        max_tool_rounds = 3
         tool_results = []
+
+        if settings.SEARCH_DECISION == 'router':
+            await self._router_search(update, history, user_query, messages, tool_results)
+            reply = None
+        else:
+            reply = await self._tool_loop(update, messages, tool_results)
+
+        if reply is None:
+            # 依 messages (含搜尋結果) 產生最終回答，此時不再提供工具
+            if tool_results:
+                await self.send_status(update, '🧠 整理回答中...')
+            final_response = await self.ollama_client.chat_with_tools(messages=messages, tools=None)
+            reply = (final_response.get('message', {}).get('content') or '').strip()
+
+        if not reply:
+            refund_quota(user_id)
+            await self.send_error(update, '模型未產生回覆，本次不計入額度。')
+            return
+
+        await self._finalize_response(
+            update, user_id, user_name, user_query, reply, tool_results, quota
+        )
+
+    async def _router_search(
+        self,
+        update: Update,
+        history: list[dict],
+        user_query: str,
+        messages: list[dict],
+        tool_results: list[dict],
+    ):
+        """router 模式：模型先判斷要不要搜尋，需要則搜尋並把結果以工具訊息加入 messages"""
+        # 帶最近 2 輪對話，讓「那明天呢？」這類追問也能判斷
+        decision = await self.ollama_client.decide_search(
+            history[-4:] + [{'role': 'user', 'content': user_query}]
+        )
+        logger.info(f'🧭 搜尋判斷: {decision}')
+        if not decision['need_search']:
+            return
+
+        query = decision['query'] or user_query
+        await self.send_status(update, '🔍 正在搜尋資訊...')
+        content, record = await self._run_search_tool({'query': query})
+        if record:
+            tool_results.append(record)
+        messages.append({
+            'role': 'assistant',
+            'content': '',
+            'tool_calls': [{'function': {'name': 'search_web', 'arguments': {'query': query}}}],
+        })
+        messages.append({'role': 'tool', 'content': content})
+
+    async def _tool_loop(
+        self,
+        update: Update,
+        messages: list[dict],
+        tool_results: list[dict],
+    ) -> str | None:
+        """
+        tools 模式：原生 Function Calling 循環 (最多 3 輪)
+        模型不呼叫工具時回傳其回答；達上限則回傳 None 由呼叫者產生最終回答
+        """
+        max_tool_rounds = 3
 
         for round_num in range(max_tool_rounds):
             logger.debug(f'Tool round {round_num + 1}')
@@ -495,19 +555,9 @@ class BotHandler:
             tool_calls = message.get('tool_calls') or []
 
             if not tool_calls:
-                # 沒有工具呼叫，直接回覆
-                assistant_reply = (message.get('content') or '').strip()
-                if assistant_reply:
-                    await self._finalize_response(
-                        update, user_id, user_name, user_query,
-                        assistant_reply, tool_results, quota
-                    )
-                else:
-                    refund_quota(user_id)
-                    await self.send_error(update, '模型未產生回覆，本次不計入額度。')
-                return
+                # 沒有工具呼叫，直接回覆 (空字串交由呼叫者處理)
+                return (message.get('content') or '').strip()
 
-            # 有工具呼叫 - 執行搜尋
             await self.send_status(update, f'🔍 正在搜尋資訊 (第 {round_num + 1} 輪)...')
 
             # 將 assistant 的工具呼叫加入訊息
@@ -540,23 +590,7 @@ class BotHandler:
                     'tool_call_id': tool_call.get('id', ''),
                 })
 
-        # 工具循環結束，取得最終回覆
-        await self.send_status(update, '🧠 整理回答中...')
-
-        final_response = await self.ollama_client.chat_with_tools(
-            messages=messages,
-            tools=None,  # 最後一輪不需要工具
-        )
-
-        assistant_reply = (final_response.get('message', {}).get('content') or '').strip()
-        if assistant_reply:
-            await self._finalize_response(
-                update, user_id, user_name, user_query,
-                assistant_reply, tool_results, quota
-            )
-        else:
-            refund_quota(user_id)
-            await self.send_error(update, '模型未產生最終回覆，本次不計入額度。')
+        return None
 
     async def _finalize_response(
         self,

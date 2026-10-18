@@ -22,7 +22,11 @@ SEARCH_TOOL = {
     'type': 'function',
     'function': {
         'name': 'search_web',
-        'description': '搜尋網路即時資訊。當使用者詢問最新新聞、即時股價、天氣、近期事件、特定人物最新動態等需要即時資料時，必須使用此工具。',
+        'description': (
+            '搜尋網路上的即時資訊。只在答案會隨時間改變、你的內建知識無法提供時使用，'
+            '例如：新聞、今天/最近發生的事、天氣、股價、匯率、比賽結果。'
+            '程式、數學、翻譯、寫作、概念解釋、歷史常識、閒聊等問題請直接回答，不要呼叫此工具。'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
@@ -36,27 +40,49 @@ SEARCH_TOOL = {
     },
 }
 
-# 系統提示詞
-SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理。請以清晰、有條理且自然的繁體中文回答使用者的問題。
+# 系統提示詞 ({today} 由 build_system_prompt 填入)
+SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理，請用清晰、有條理且自然的繁體中文回答。
+今天日期：{today}
 
-【可用工具】
-你可以使用 `search_web` 工具搜尋即時資訊。當遇到以下情況時，**必須**主動呼叫搜尋工具：
-1. 使用者詢問「最新」、「新聞」、「即時」、「今天」、「近期」等時效性關鍵字
-2. 詢問即時股價、匯率、天氣、賽事比分、選舉開票等動態數據
-3. 詢問特定人物/公司/產品的最新動態
-4. 你的內建知識無法回答或可能已過時的問題
+【何時搜尋】
+預設直接用你自己的知識回答。只有在答案取決於「現在」或「最近」的資料時，才呼叫 `search_web`：
+- 需要搜尋：新聞、今天/近期事件、天氣、股價、匯率、比賽結果、某人或某公司的最新動態
+- 不要搜尋：寫程式、數學計算、翻譯、寫作、解釋概念或原理、歷史與常識、打招呼閒聊、比較或分析使用者提供的內容
 
-【工具使用原則】
-- 搜尋查詢請精簡，只保留核心關鍵字 (實體名詞、事件、數字)
-- 若搜尋結果不相關，可嘗試不同關鍵字再次搜尋
-- 獲得搜尋結果後，請**綜合分析並用自己的話回答**，**不要**在回答中包含來源引用、連結或參考文獻格式
-- 系統會自動在回答末尾附上參考來源
+【搜尋後如何回答】
+- 搜尋結果只是參考資料，請直接回答使用者原本的問題，用自己的話整理
+- 不要說「我選擇結果 1」、「根據搜尋結果」之類的話，也不要列出來源或連結 (系統會自動附上)
+- 若搜尋結果與問題無關，忽略它，改用自己的知識回答並說明無法取得即時資料
 
 【回答格式】
-- 使用條列式、粗體標題讓重點清晰
-- 直接回答問題，不需列出「資料來源：」或「參考來源：」等字樣
-- 系統會自動附上來源連結
+- 重點用條列式與粗體標題
+- 程式碼放在 ``` 程式碼區塊中
 """
+
+
+# 搜尋判斷 (router 模式)：先讓模型輸出 JSON 決定要不要搜尋，再回答
+# 部分模型 (如 llama3.1) 只要帶 tools 幾乎必定呼叫工具，無法自行判斷「不需要搜尋」
+ROUTER_PROMPT = """今天日期：{today}
+判斷回答使用者最新的問題是否需要上網搜尋即時資訊 (可參考前文理解指代)。
+需要搜尋：新聞、今天/最近發生的事、天氣、股價、匯率、比賽結果、某人或公司的最新動態。
+不需要搜尋：寫程式、數學、翻譯、寫作、解釋概念、歷史常識、閒聊、分析使用者提供的內容。
+只輸出 JSON：{{"need_search": true 或 false, "query": "精簡的搜尋關鍵字，不需要時為空字串"}}"""
+
+ROUTER_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'need_search': {'type': 'boolean'},
+        'query': {'type': 'string'},
+    },
+    'required': ['need_search', 'query'],
+}
+
+
+def build_system_prompt() -> str:
+    """產生含今日日期的系統提示詞 (讓模型判斷「今天」「最近」)"""
+    from datetime import date
+
+    return SYSTEM_PROMPT.format(today=date.today().isoformat())
 
 
 class OllamaClient:
@@ -175,6 +201,42 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'Ollama 請求失敗: {e}')
             raise
+
+    async def decide_search(self, conversation: list[dict]) -> dict:
+        """
+        讓模型判斷是否需要搜尋 (router 模式)
+        conversation: 不含 system 的 user/assistant 訊息 (最後一則為使用者問題)
+        回傳: {'need_search': bool, 'query': str}；解析失敗視為不搜尋
+        """
+        from datetime import date
+
+        client = await self._get_client()
+        payload = {
+            'model': self.model,
+            'messages': [
+                {'role': 'system', 'content': ROUTER_PROMPT.format(today=date.today().isoformat())},
+                *conversation,
+            ],
+            'stream': False,
+            'format': ROUTER_SCHEMA,
+            'options': {
+                'temperature': 0,
+                'num_predict': 64,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
+            },
+        }
+        resp = await client.post(OLLAMA_API_CHAT, json=payload)
+        resp.raise_for_status()
+        content = resp.json().get('message', {}).get('content', '')
+        try:
+            data = json.loads(content)
+            return {
+                'need_search': bool(data.get('need_search')),
+                'query': str(data.get('query') or '').strip(),
+            }
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning(f'搜尋判斷 JSON 解析失敗，視為不搜尋: {content!r}')
+            return {'need_search': False, 'query': ''}
 
     async def chat_stream(
         self,

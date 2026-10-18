@@ -287,6 +287,39 @@ Markdown 解析器中 inline code (`code`) 被斜體規則誤處理，導致 `__
 
 ---
 
+## ADR-014: 搜尋判斷改為 router 模式 (模型先輸出 JSON 決定是否搜尋)
+
+**日期**: 2026-10-18
+**狀態**: Accepted
+
+### 背景
+實測 14 題 (8 題不需搜尋、6 題需即時資料)，原生 Function Calling 下：
+- `llama3.1`：14 題全部呼叫 `search_web` (6/14)，連「你好」「123*456」都搜尋；調整 system prompt 與工具描述無效 (Ollama 的 llama3.1 模板在帶 tools 時會要求模型輸出函式呼叫)
+- `qwen2.5`：幾乎從不搜尋 (8/14)
+- `gemma4`：14/14，但每次判斷約 7 秒
+
+搜尋後模型還會照抄搜尋結果 (「我選擇結果 1」)，答非所問。
+
+### 決策
+新增 `SEARCH_DECISION=router|tools`，預設 `router`：
+1. `decide_search()` 以 `format` JSON schema 讓模型輸出 `{need_search, query}` (帶最近 2 輪對話以理解追問)
+2. 需要時執行搜尋，結果以 assistant `tool_calls` + `role: tool` 加入 messages
+3. 以 `tools=None` 產生最終回答
+
+保留原生 `tools` 模式給判斷能力足夠的模型 (如 gemma4)。System prompt 改為「預設直接回答」並加入今日日期。
+
+### 理由
+- router 在 `llama3.1`、`qwen2.5` 皆 14/14，每次判斷約 0.6 秒
+- 仍由模型自主決定是否搜尋與搜尋關鍵字，符合「非關鍵字硬編碼觸發」原則
+- 與模型的 tool calling 能力解耦，換模型不需重新調校
+
+### 後果
+- 每則訊息多一次短呼叫 (約 0.6 秒)
+- router 模式每次最多搜尋 1 次，不支援多輪補搜
+- 判斷規則集中在 `ROUTER_PROMPT`
+
+---
+
 ## 更新決策記錄
 
 新增 ADR 格式：

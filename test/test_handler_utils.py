@@ -79,6 +79,9 @@ class _FailingOllama:
     async def chat_with_tools(self, **kwargs):
         raise self.exc
 
+    async def decide_search(self, conversation):
+        raise self.exc
+
 
 def _fake_update(user_id: int):
     return SimpleNamespace(
@@ -129,3 +132,64 @@ async def test_process_query_timeout(monkeypatch):
 async def test_process_query_unexpected_error(monkeypatch):
     errors = await _run_failing_query(monkeypatch, ValueError('boom'))
     assert len(errors) == 1 and '不計入額度' in errors[0]
+
+
+class _RouterOllama:
+    """模擬 router 模式：判斷結果可控，回答固定"""
+
+    def __init__(self, need_search: bool):
+        self.need_search = need_search
+        self.calls: list[dict] = []
+
+    async def decide_search(self, conversation):
+        return {'need_search': self.need_search, 'query': '台灣 天氣' if self.need_search else ''}
+
+    async def chat_with_tools(self, messages, tools=None, **kwargs):
+        self.calls.append({'messages': list(messages), 'tools': tools})
+        return {'message': {'role': 'assistant', 'content': '回答內容'}}
+
+
+async def _run_router_query(monkeypatch, need_search: bool):
+    user_id = 434343
+    searched: list[str] = []
+    finals: list[str] = []
+
+    bh = BotHandler()
+    bh.ollama_client = _RouterOllama(need_search)
+
+    async def fake_status(update, text, parse_mode=None):
+        return None
+
+    async def fake_final(update, text, parse_mode=None):
+        finals.append(text)
+
+    async def fake_search(query, max_results=None):
+        searched.append(query)
+        return [{'title': 'T', 'url': 'https://example.com', 'snippet': 'S'}]
+
+    monkeypatch.setattr(handler_mod.settings, 'SEARCH_DECISION', 'router')
+    monkeypatch.setattr(bh, 'send_status', fake_status)
+    monkeypatch.setattr(bh, 'send_final_response', fake_final)
+    monkeypatch.setattr(handler_mod, 'search', fake_search)
+    monkeypatch.setattr(handler_mod, 'get_conversation_history', lambda uid: [])
+    monkeypatch.setattr(handler_mod, 'save_conversation_turn', lambda *a: None)
+    monkeypatch.setattr(handler_mod, 'log_interaction', lambda **k: None)
+
+    await bh._process_query(_fake_update(user_id), '問題', {'current': 1, 'max': 50})
+    return bh.ollama_client.calls, searched, finals
+
+
+async def test_router_no_search(monkeypatch):
+    calls, searched, finals = await _run_router_query(monkeypatch, need_search=False)
+    assert searched == []
+    assert len(calls) == 1 and calls[0]['tools'] is None
+    assert finals and '回答內容' in finals[0] and '搜尋來源' not in finals[0]
+
+
+async def test_router_with_search(monkeypatch):
+    calls, searched, finals = await _run_router_query(monkeypatch, need_search=True)
+    assert searched == ['台灣 天氣']
+    assert len(calls) == 1 and calls[0]['tools'] is None
+    roles = [m['role'] for m in calls[0]['messages']]
+    assert roles[-2:] == ['assistant', 'tool']
+    assert finals and '搜尋來源' in finals[0] and 'https://example.com' in finals[0]

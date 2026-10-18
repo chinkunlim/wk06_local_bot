@@ -12,6 +12,7 @@
 - 或 `OLLAMA_MODEL=nemotron3-ultra` (需大顯存)
 - 在 System Prompt 加強工具使用指引
 **狀態**: ✅ **已解決** (v1.0.1 切換至 llama3.1)
+**補充 (v1.0.3)**: 實測原生 Function Calling 下 llama3.1 反而每題都搜尋、qwen2.5 幾乎不搜；改用 `SEARCH_DECISION=router` 後兩者皆能正確判斷 (見 ADR-014)。
 
 ### ISSUE-014: 配額檢查死鎖 (已修復)
 **現象**: 發送訊息後無反應、終端機無日誌、配額檔案不建立。

@@ -164,6 +164,15 @@ SEARCH_ENGINE=duckduckgo
 SEARCH_ENGINE=google_news
 ```
 
+### 搜尋判斷方式
+```env
+# 預設：模型先判斷是否需要搜尋 (寫程式、翻譯、常識等直接回答，新聞/天氣/股價才搜)
+SEARCH_DECISION=router
+
+# 原生 Function Calling：需模型本身能判斷 (llama3.1 會每題都搜，建議搭配 gemma4)
+SEARCH_DECISION=tools
+```
+
 ### 調整配額
 ```env
 MAX_DAILY_REQUESTS=100

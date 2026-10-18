@@ -94,15 +94,17 @@ Application.dispatcher
                             _process_query() (核心邏輯)
                                     │
                                     ├── 取得對話歷史 get_conversation_history()
-                                    ├── 建立 messages (system + history + user)
-                                    ├── 工具循環 (最多 3 輪)
-                                    │     ├── ollama.chat_with_tools(messages, tools=[SEARCH_TOOL])
-                                    │     ├── 解析 tool_calls
-                                    │     ├── 執行 search() → 取得結果
-                                    │     ├── messages.append(role=tool, content=結果)
-                                    │     └── 重複直到無 tool_calls 或達上限
+                                    ├── 建立 messages (build_system_prompt() 含今日日期 + history + user)
+                                    ├── 搜尋判斷 (SEARCH_DECISION)
+                                    │     ├── router (預設) _router_search()
+                                    │     │     ├── ollama.decide_search() → JSON {need_search, query}
+                                    │     │     └── 需要時 search() → messages.append(assistant tool_calls + role=tool)
+                                    │     └── tools _tool_loop() (最多 3 輪)
+                                    │           ├── ollama.chat_with_tools(messages, tools=[SEARCH_TOOL])
+                                    │           ├── 解析 tool_calls → 執行 search() → role=tool
+                                    │           └── 無 tool_calls 時直接取得回答
                                     │
-                                    ├── 最後一次 ollama.chat_with_tools(messages, tools=None)
+                                    ├── 尚無回答時 ollama.chat_with_tools(messages, tools=None)
                                     ├── 組裝最終回覆 (含來源、額度)
                                     ├── send_final_response() (edit 或 send)
                                     ├── save_conversation_turn()
@@ -217,7 +219,9 @@ print(asyncio.run(search('test')))
 | 改上下文長度 | `.env` → `OLLAMA_NUM_CTX` | 預設 8192，越大越吃記憶體 |
 | 改 System Prompt | `llm/ollama_client.py` → `SYSTEM_PROMPT` | 影響所有回答風格 |
 | 加白名單用戶 | `.env` → `ALLOWED_USER_IDS` | 逗號分隔，重啟生效 |
-| 修改工具描述 | `llm/ollama_client.py` → `SEARCH_TOOL` | 影響模型呼叫意願 |
+| 修改工具描述 | `llm/ollama_client.py` → `SEARCH_TOOL` | 影響模型呼叫意願 (僅 tools 模式) |
+| 修改搜尋判斷規則 | `llm/ollama_client.py` → `ROUTER_PROMPT` | router 模式下決定何時搜尋 |
+| 切換搜尋判斷方式 | `.env` → `SEARCH_DECISION` | `router` \| `tools`，重啟生效 |
 | 修改搜尋關鍵字提取 | `search/duckduckgo.py` → `extract_search_keywords()` | 通用中文清洗邏輯 |
 
 ---
@@ -228,7 +232,7 @@ print(asyncio.run(search('test')))
 |------|----------|
 | Bot 無回應 | 1. `logs/bot.log` 檢查錯誤 2. `uv run python check_env.py` 3. 確認 Ollama 運行 `ollama ps` |
 | 搜尋無結果 | 1. 日誌看 `🔧 模型呼叫搜尋` 關鍵字 2. 手動測試 `search_duckduckgo_sync()` 3. 切換 `SEARCH_ENGINE=google_news` |
-| 模型不呼叫工具 | 1. 確認模型支援 Function Calling 2. 檢查 `SYSTEM_PROMPT` 工具指引 3. 改用 `llama3.1`/`nemotron3-ultra` |
+| 模型不呼叫工具 / 每題都搜尋 | 1. 日誌看 `🧭 搜尋判斷` 2. 預設 `SEARCH_DECISION=router` 調整 `ROUTER_PROMPT` 3. tools 模式下 llama3.1 會每題都搜、qwen2.5 幾乎不搜，改用 router 或 gemma4 |
 | 配額不重置 | 1. 檢查主機時區 `date` 2. `data/quota/quota.json` 手動刪除 3. 確認 `date.today()` 正確 |
 | 記憶體暴增 | 1. 檢查 `MAX_HISTORY_TURNS` 2. 確認 `data/cache/history/` 檔案大小 3. 重啟 Bot 釋放 |
 | `Conflict: terminated by other getUpdates request` | 1. `pkill -f "bot.main"` 停止所有實例 2. 執行 `deleteWebhook(drop_pending_updates=True)` 清理 pending updates |

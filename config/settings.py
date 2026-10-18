@@ -12,6 +12,7 @@ if env_path.exists():
     load_dotenv(env_path)
 
 SUPPORTED_SEARCH_ENGINES = ('duckduckgo', 'google_news')
+SUPPORTED_SEARCH_DECISIONS = ('router', 'tools')
 
 
 def _parse_user_ids(raw: str) -> tuple[list[int], list[str]]:
@@ -54,6 +55,10 @@ class Settings:
     SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news
     SEARCH_MAX_RESULTS: int = int(os.getenv('SEARCH_MAX_RESULTS', '4'))
     SEARCH_TIMEOUT: int = int(os.getenv('SEARCH_TIMEOUT', '15'))  # 秒
+    # 搜尋判斷方式：
+    # - router：先讓模型輸出 JSON 判斷要不要搜 (適用所有模型，llama3.1 / qwen2.5 建議)
+    # - tools ：原生 Function Calling，模型自行呼叫工具 (需模型能正確判斷，如 gemma4)
+    SEARCH_DECISION: str = os.getenv('SEARCH_DECISION', 'router')
 
     # === 對話記憶設定 ===
     MAX_HISTORY_TURNS: int = int(os.getenv('MAX_HISTORY_TURNS', '4'))
@@ -82,6 +87,10 @@ class Settings:
             errors.append('ALLOWED_USER_IDS 未設定 (至少需一個用戶 ID)')
         if cls.INVALID_USER_IDS:
             errors.append(f'ALLOWED_USER_IDS 含非數字項目: {", ".join(cls.INVALID_USER_IDS)}')
+        if cls.SEARCH_DECISION not in SUPPORTED_SEARCH_DECISIONS:
+            errors.append(
+                f'SEARCH_DECISION={cls.SEARCH_DECISION} 不支援 (可用: {" | ".join(SUPPORTED_SEARCH_DECISIONS)})'
+            )
         if cls.SEARCH_ENGINE not in SUPPORTED_SEARCH_ENGINES:
             errors.append(
                 f'SEARCH_ENGINE={cls.SEARCH_ENGINE} 不支援 (可用: {" | ".join(SUPPORTED_SEARCH_ENGINES)})'

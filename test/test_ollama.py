@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm.ollama_client import SEARCH_TOOL, SYSTEM_PROMPT, get_ollama_client, init_ollama
+from llm.ollama_client import SEARCH_TOOL, build_system_prompt, get_ollama_client, init_ollama
 
 
 async def test_connection():
@@ -45,7 +45,7 @@ async def test_chat_with_tools():
     client = get_ollama_client()
     response = await client.chat_with_tools(
         messages=[
-            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': build_system_prompt()},
             {'role': 'user', 'content': '台灣今天天氣如何？'}
         ],
         tools=[SEARCH_TOOL],
