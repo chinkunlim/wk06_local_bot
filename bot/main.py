@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 async def main():
     """主程式"""
+    from bot.handler import _debug_log, setup_bot
     from config.settings import settings
-    from bot.handler import bot_handler, setup_bot, _debug_log
-    
+
     # 驗證設定
     errors = settings.validate()
     if errors:
@@ -42,7 +42,7 @@ async def main():
             logger.error(f'  - {err}')
         logger.error('\n請複製 .env.example 為 .env 並填入必要資訊')
         sys.exit(1)
-    
+
     logger.info('=' * 50)
     logger.info('🤖 本地 AI Telegram Bot 啟動中...')
     logger.info(f'   模型: {settings.OLLAMA_MODEL}')
@@ -51,19 +51,19 @@ async def main():
     logger.info(f'   白名單用戶: {len(settings.ALLOWED_USER_IDS)} 位')
     logger.info(f'   每日額度: {settings.MAX_DAILY_REQUESTS} 次')
     logger.info('=' * 50)
-    
+
     # 建立並啟動 Bot
     application = await setup_bot()
-    
+
     # 初始化
     await application.initialize()
     await application.start()
-    
+
     # 刪除現有 webhook (使用 polling 模式)
     await application.bot.delete_webhook(drop_pending_updates=True)
-    
+
     logger.info('✅ Bot 已啟動，開始輪詢訊息... (Ctrl+C 停止)')
-    
+
     try:
         # 開始 polling
         _debug_log('Starting polling...')
@@ -72,11 +72,11 @@ async def main():
             drop_pending_updates=False,
         )
         _debug_log('Polling started successfully')
-        
+
         # 保持運行
         while True:
             await asyncio.sleep(3600)
-            
+
     except KeyboardInterrupt:
         logger.info('\n⏹️ 收到停止訊號，正在關閉...')
     except Exception as e:

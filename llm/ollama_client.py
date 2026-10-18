@@ -2,9 +2,10 @@
 Ollama Client - 支援 Function Calling / Tool Use
 """
 import json
-import httpx
-from typing import List, Dict, Any, Optional, AsyncGenerator
 import logging
+from collections.abc import AsyncGenerator
+
+import httpx
 
 from config.settings import settings
 
@@ -59,7 +60,7 @@ SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理。請以�
 
 class OllamaClient:
     """Ollama API 客戶端，支援 Function Calling"""
-    
+
     def __init__(
         self,
         base_url: str = None,
@@ -69,8 +70,8 @@ class OllamaClient:
         self.base_url = base_url or settings.OLLAMA_BASE_URL
         self.model = model or settings.OLLAMA_MODEL
         self.timeout = timeout or settings.OLLAMA_TIMEOUT
-        self._client: Optional[httpx.AsyncClient] = None
-    
+        self._client: httpx.AsyncClient | None = None
+
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
@@ -78,12 +79,12 @@ class OllamaClient:
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
         return self._client
-    
+
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
-    
-    async def list_models(self) -> List[Dict]:
+
+    async def list_models(self) -> list[dict]:
         """列出本地可用模型"""
         client = await self._get_client()
         try:
@@ -94,12 +95,12 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'列出模型失敗: {e}')
             return []
-    
+
     async def check_model_exists(self) -> bool:
         """檢查指定模型是否存在"""
         models = await self.list_models()
         return any(self.model in m.get('name', '') for m in models)
-    
+
     async def pull_model(self) -> bool:
         """拉取模型 (若不存在)"""
         client = await self._get_client()
@@ -124,21 +125,21 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'拉取模型失敗: {e}')
             return False
-    
+
     async def chat_with_tools(
         self,
-        messages: List[Dict],
-        tools: List[Dict] = None,
+        messages: list[dict],
+        tools: list[dict] = None,
         tool_choice: str = 'auto',
         temperature: float = 0.7,
         max_tokens: int = 8192,
-    ) -> Dict:
+    ) -> dict:
         """
         支援 Function Calling 的對話
         回傳: {'message': {...}, 'tool_calls': [...], 'usage': {...}}
         """
         client = await self._get_client()
-        
+
         payload = {
             'model': self.model,
             'messages': messages,
@@ -150,11 +151,11 @@ class OllamaClient:
                 'top_p': 0.95,
             },
         }
-        
+
         if tools:
             payload['tools'] = tools
             payload['tool_choice'] = tool_choice
-        
+
         try:
             resp = await client.post(OLLAMA_API_CHAT, json=payload)
             resp.raise_for_status()
@@ -168,11 +169,11 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'Ollama 請求失敗: {e}')
             raise
-    
+
     async def chat_stream(
         self,
-        messages: List[Dict],
-        tools: List[Dict] = None,
+        messages: list[dict],
+        tools: list[dict] = None,
         temperature: float = 0.7,
         max_tokens: int = 8192,
     ) -> AsyncGenerator[str, None]:
@@ -180,7 +181,7 @@ class OllamaClient:
         串流對話 (不支援 Function Calling，僅用於最終回答生成)
         """
         client = await self._get_client()
-        
+
         payload = {
             'model': self.model,
             'messages': messages,
@@ -192,7 +193,7 @@ class OllamaClient:
                 'top_p': 0.95,
             },
         }
-        
+
         try:
             async with client.stream('POST', OLLAMA_API_CHAT, json=payload) as resp:
                 resp.raise_for_status()
@@ -212,7 +213,7 @@ class OllamaClient:
 
 
 # 全域單例
-_ollama_client: Optional[OllamaClient] = None
+_ollama_client: OllamaClient | None = None
 
 
 def get_ollama_client() -> OllamaClient:
@@ -225,7 +226,7 @@ def get_ollama_client() -> OllamaClient:
 async def init_ollama() -> OllamaClient:
     """初始化並檢查模型"""
     client = get_ollama_client()
-    
+
     # 檢查模型是否存在
     exists = await client.check_model_exists()
     if not exists:
@@ -233,6 +234,6 @@ async def init_ollama() -> OllamaClient:
         success = await client.pull_model()
         if not success:
             raise RuntimeError(f'無法取得模型 {client.model}，請手動執行: ollama pull {client.model}')
-    
+
     logger.info(f'✅ Ollama 就緒: {client.model} @ {client.base_url}')
     return client

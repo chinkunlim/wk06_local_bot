@@ -194,7 +194,7 @@ uv run python -m py_compile bot/**/*.py llm/**/*.py search/**/*.py config/**/*.p
 uv run python check_env.py
 
 # 單元測試 (待補全)
-uv run pytest tests/ -v
+uv run pytest test/ -v
 
 # 手動測試指令
 uv run python -c "

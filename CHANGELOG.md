@@ -52,6 +52,23 @@
 
 ---
 
+## [1.0.3] - 2026-10-18
+
+### 修復
+- **修復 HTML 跳脫失效**：`markdown_to_html` 的 `&`/`<`/`>` 跳脫原本是空操作 (`replace('&', '&')`)，回答含 `<`、`&` 時 Telegram HTML 解析失敗
+- **修復誤判 HTML 標籤**：只保留 Telegram 支援的標籤 (`b`/`i`/`code`/`a`…)，`5 < 10 & 3 > 2` 這類文字不再被當成標籤原樣送出
+- **修復來源標題、使用者名稱未跳脫**：搜尋來源標題、`/start` 名稱、錯誤訊息改用 `html.escape`
+- **修復 Google News 實體解碼**：`decode_xml_entities` 原本為空操作，改用 `html.unescape`；`clean_html` 改為先解碼再移除標籤
+- **工具參數相容 JSON 字串**：`tool_calls[].function.arguments` 若為字串則 `json.loads`，解析失敗記錄警告
+- **修復 pytest 找不到測試**：`testpaths` 改為 `test`，加入 `pythonpath = ["."]`；移除測試中寫死的 `sys.path`
+
+### 變更
+- 移除未使用依賴 `pydantic`、`pydantic-settings`、`lxml` (`uv remove`)
+- ruff 設定移至 `[tool.ruff.lint]`
+- 測試文件改用 `uv run` 指令
+
+---
+
 ## 版本規劃
 
 ### [1.1.0] - 規劃中

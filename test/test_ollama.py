@@ -4,9 +4,11 @@ Ollama Client 測試
 """
 import asyncio
 import sys
-sys.path.insert(0, '/Users/limchinkun/Desktop/wk06_bot_local')
+from pathlib import Path
 
-from llm.ollama_client import get_ollama_client, init_ollama, SYSTEM_PROMPT, SEARCH_TOOL
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from llm.ollama_client import SEARCH_TOOL, SYSTEM_PROMPT, get_ollama_client, init_ollama
 
 
 async def test_connection():

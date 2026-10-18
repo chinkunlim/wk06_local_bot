@@ -116,7 +116,7 @@
 **規避**: `handler.py` 中用 `seen_urls` set 去重，但跨輪次未共享。
 
 ### ISSUE-011: 無單元測試
-**現象**: `tests/` 目錄為空。
+**現象**: `test/` 目錄測試尚未完整 (多數依賴網路/Ollama)。
 **計劃**: 
 - `pytest` + `pytest-asyncio` 測試搜尋、工具循環、配額邏輯
 - Mock Ollama 回應測試各種工具呼叫場景

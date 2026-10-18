@@ -176,7 +176,7 @@ ollama pull command-r            # 專為 RAG/工具設計
 直接呼叫 Ollama REST API，不引入 LangChain/LlamaIndex。
 
 ### 理由
-- ✅ 依賴極少 (僅 httpx, pydantic)
+- ✅ 依賴極少 (僅 httpx)
 - ✅ 完全掌控提示詞、工具循環、錯誤處理
 - ✅ 避免框架抽象層帶來的除錯困難
 - ✅ 專案規模小，框架帶來的效益有限

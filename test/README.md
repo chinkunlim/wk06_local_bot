@@ -5,23 +5,26 @@
 ## 執行方式
 
 ```bash
+# 用 pytest 執行全部 (testpaths = test)
+uv run pytest -v
+
 # 執行所有測試
-cd /Users/limchinkun/Desktop/wk06_bot_local
-python test/run_all.py
+cd wk06_bot_local
+uv run python test/run_all.py
 
 # 執行特定測試
-python test/run_all.py search
-python test/run_all.py markdown
-python test/run_all.py ollama
-python test/run_all.py conversation
-python test/run_all.py settings
+uv run python test/run_all.py search
+uv run python test/run_all.py markdown
+uv run python test/run_all.py ollama
+uv run python test/run_all.py conversation
+uv run python test/run_all.py settings
 
 # 直接執行單一測試檔案
-python test/test_search.py
-python test/test_markdown.py
-python test/test_ollama.py
-python test/test_conversation.py
-python test/test_settings.py
+uv run python test/test_search.py
+uv run python test/test_markdown.py
+uv run python test/test_ollama.py
+uv run python test/test_conversation.py
+uv run python test/test_settings.py
 ```
 
 ## 測試項目
@@ -45,7 +48,7 @@ python test/test_settings.py
 
 ```bash
 # 執行前先確保環境
-cd /Users/limchinkun/Desktop/wk06_bot_local
+cd wk06_bot_local
 uv sync
 
 # 執行特定測試
