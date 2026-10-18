@@ -212,10 +212,11 @@ print(asyncio.run(search('test')))
 |------|----------|------|
 | 改模型 | `.env` → `OLLAMA_MODEL` | 需 `ollama pull` |
 | 改搜尋引擎 | `.env` → `SEARCH_ENGINE` | `duckduckgo` \| `google_news` |
-| 改配額 | `.env` → `MAX_DAILY_REQUESTS` | 即時生效 |
+| 改配額 | `.env` → `MAX_DAILY_REQUESTS` | 重啟生效 |
 | 改對話輪數 | `.env` → `MAX_HISTORY_TURNS` | 重啟生效 |
+| 改上下文長度 | `.env` → `OLLAMA_NUM_CTX` | 預設 8192，越大越吃記憶體 |
 | 改 System Prompt | `llm/ollama_client.py` → `SYSTEM_PROMPT` | 影響所有回答風格 |
-| 加白名單用戶 | `.env` → `ALLOWED_USER_IDS` | 逗號分隔，即時生效 |
+| 加白名單用戶 | `.env` → `ALLOWED_USER_IDS` | 逗號分隔，重啟生效 |
 | 修改工具描述 | `llm/ollama_client.py` → `SEARCH_TOOL` | 影響模型呼叫意願 |
 | 修改搜尋關鍵字提取 | `search/duckduckgo.py` → `extract_search_keywords()` | 通用中文清洗邏輯 |
 

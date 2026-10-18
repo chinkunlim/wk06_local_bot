@@ -39,8 +39,11 @@ def extract_search_keywords(query: str) -> str:
     # 移除指令前綴
     query = re.sub(r'^(/search|/news)\s*', '', query, flags=re.IGNORECASE).strip()
 
-    # 將標點符號替換為空格
-    query = re.sub(r'[。，！？!?,\.\n/；;:：、～~—_()（）「」『』《》#@+=*&^%$]+', ' ', query)
+    # 將標點符號替換為空格 (保留 C++、C#、llama3.1 這類詞內符號)
+    query = re.sub(r'[。，！？!?,\n/；;:：、～~—_()（）「」『』《》@=*&^%$]+', ' ', query)
+    query = re.sub(r'(?<!\w)\.|\.(?!\w)', ' ', query)
+    query = re.sub(r'(?<![\w+])\++', ' ', query)
+    query = re.sub(r'(?<!\w)#(?!\w)', ' ', query)
 
     # 移除常見提問贅詞
     stop_phrases = [
@@ -57,11 +60,10 @@ def extract_search_keywords(query: str) -> str:
     for phrase in stop_phrases:
         query = re.sub(re.escape(phrase), ' ', query, flags=re.IGNORECASE)
 
-    # 清理助詞
+    # 清理助詞：只移除獨立的助詞與句尾疑問詞，不從詞內剝字 (避免「和平」→「平」)
     particles = ['的', '了', '和', '與', '在', '之', '個', '嗎', '呢', '啊', '吧', '請']
-    words = query.split()
-    words = [w.strip(''.join(particles)) for w in words]
-    words = [w for w in words if w and w not in particles and len(w) > 0]
+    words = [w.rstrip('嗎呢') for w in query.split()]
+    words = [w for w in words if w and w not in particles]
 
     # 去重並取前 5 個關鍵字
     unique_words = []
@@ -165,10 +167,5 @@ def format_search_results(results: list[dict]) -> str:
 # 同步版本 (供非 async 環境使用)
 def search_duckduckgo_sync(query: str, max_results: int = 4) -> list[dict]:
     """同步版本的搜尋"""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(search_duckduckgo(query, max_results))
+    from search import run_sync
+    return run_sync(search_duckduckgo(query, max_results))

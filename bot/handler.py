@@ -4,9 +4,12 @@ Telegram Bot 主處理器 - 整合對話、搜尋、LLM 呼叫
 import html
 import json
 import logging
+import re
 
+import httpx
 from telegram import Message, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -22,6 +25,7 @@ from bot.conversation import (
     get_quota_status,
     is_user_authorized,
     log_interaction,
+    refund_quota,
     save_conversation_turn,
 )
 from config.settings import settings
@@ -33,24 +37,34 @@ from llm.ollama_client import (
 )
 from search import format_results, search
 
+logger = logging.getLogger(__name__)
+
+# Telegram 單則訊息上限 4096 字元，保留緩衝
+TELEGRAM_MAX_LENGTH = 4000
+
+
+def _escape(text: str) -> str:
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
 
 def markdown_to_html(text: str) -> str:
     """將 Markdown 轉換為 Telegram 支援的 HTML"""
     if not text:
         return ''
 
-    import re
-
     # ===== 階段 0: 保護所有特殊標記 =====
     protected = {}
     prot_id = 0
 
-    def protect(match):
+    def store(content: str) -> str:
         nonlocal prot_id
         key = f'__PROTECTED_{prot_id}__'
         prot_id += 1
-        protected[key] = match.group(0)
+        protected[key] = content
         return key
+
+    def protect(match):
+        return store(match.group(0))
 
     # 保護程式碼區塊
     text = re.sub(r'```[\s\S]*?```', protect, text)
@@ -64,7 +78,17 @@ def markdown_to_html(text: str) -> str:
     )
 
     # ===== 階段 1: HTML 跳脫 =====
-    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    text = _escape(text)
+
+    # 保護超連結與網址，避免網址內的 _ * 被斜體/粗體規則破壞
+    # [text](url)：文字仍可含粗體，網址直接保護
+    text = re.sub(
+        r'\[([^\]]+)\]\((https?://[^\s)]+)\)',
+        lambda m: f'<a href="{store(m.group(2))}">{m.group(1)}</a>',
+        text,
+    )
+    # 純網址 (不在 href="..." 內)
+    text = re.sub(r'(?<!href=")https?://[^\s<>()（）。，、；：！？「」]+', protect, text)
 
     # ===== 階段 2: 處理 Markdown =====
     # 粗體 **text** (處理未閉合)
@@ -75,7 +99,7 @@ def markdown_to_html(text: str) -> str:
 
     # 斜體 *text* 或 _text_
     text = re.sub(r'(^|[^\*])\*([^\*\n]+)\*([^\*]|$)', r'\1<i>\2</i>\3', text)
-    text = re.sub(r'(^|[^_])_([^_\n]+)_([^_]|$)', r'\1<i>\2</i>\3', text)
+    text = re.sub(r'(^|[^_\w])_([^_\n]+)_([^_\w]|$)', r'\1<i>\2</i>\3', text)
 
     # 標題 # text -> <b>text</b>
     text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
@@ -86,37 +110,64 @@ def markdown_to_html(text: str) -> str:
     # 分割線
     text = re.sub(r'^---+$', '──────────────', text, flags=re.MULTILINE)
 
-    # 超連結 [text](url)
-    text = re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', r'<a href="\2">\1</a>', text)
-
-    # ===== 階段 2: 還原受保護內容 =====
+    # ===== 階段 3: 還原受保護內容 =====
     def restore_protected(match):
         key = match.group(0)
-        if key in protected:
-            content = protected[key]
-            # 程式碼區塊
-            if content.startswith('```') and content.endswith('```'):
-                code = content[3:-3]
-                # 移除語言指定符
-                lines = code.split('\n')
-                if lines and lines[0].strip() and ' ' not in lines[0].strip():
-                    code = '\n'.join(lines[1:])
-                escaped = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                return f'<pre><code>{escaped.strip()}</code></pre>'
-            # 行內程式碼
-            if content.startswith('`') and content.endswith('`'):
-                code = content[1:-1]
-                escaped = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                return f'<code>{escaped}</code>'
-            # HTML 標籤直接還原
-            return content
-        return key
+        if key not in protected:
+            return key
+        content = protected[key]
+        # 程式碼區塊
+        if content.startswith('```') and content.endswith('```'):
+            code = content[3:-3]
+            # 移除語言指定符
+            lines = code.split('\n')
+            if lines and lines[0].strip() and ' ' not in lines[0].strip():
+                code = '\n'.join(lines[1:])
+            return f'<pre><code>{_escape(code.strip())}</code></pre>'
+        # 行內程式碼
+        if content.startswith('`') and content.endswith('`'):
+            return f'<code>{_escape(content[1:-1])}</code>'
+        # HTML 標籤、網址直接還原
+        return content
 
-    text = re.sub(r'__PROTECTED_\d+__', restore_protected, text)
+    # 受保護內容可能互相巢狀 (如連結文字含行內程式碼)，重複還原
+    for _ in range(3):
+        restored = re.sub(r'__PROTECTED_\d+__', restore_protected, text)
+        if restored == text:
+            break
+        text = restored
 
     return text
 
-logger = logging.getLogger(__name__)
+
+def split_message(text: str, limit: int = TELEGRAM_MAX_LENGTH) -> list[str]:
+    """依換行切割過長訊息，單行超長則硬切"""
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    current = ''
+    for line in text.split('\n'):
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ''
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = f'{current}\n{line}' if current else line
+        if len(candidate) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def html_to_plain(text: str) -> str:
+    """移除 HTML 標籤並還原實體 (HTML 解析失敗時的退路)"""
+    return html.unescape(re.sub(r'<[^>]+>', '', text))
 
 
 class BotHandler:
@@ -124,7 +175,40 @@ class BotHandler:
 
     def __init__(self):
         self.ollama_client = get_ollama_client()
-        self._status_messages: dict[int, int] = {}  # chat_id -> message_id
+        # update_id -> 狀態訊息 message_id (以請求區分，避免同聊天室並發互相覆蓋)
+        self._status_messages: dict[int, int] = {}
+
+    async def _reply(self, update: Update, text: str, parse_mode: ParseMode | None) -> Message:
+        """回覆訊息；HTML 解析失敗時改送純文字"""
+        try:
+            return await update.message.reply_text(
+                text, parse_mode=parse_mode, disable_web_page_preview=True,
+            )
+        except BadRequest as e:
+            if parse_mode is None:
+                raise
+            logger.warning(f'HTML 解析失敗，改送純文字: {e}')
+            return await update.message.reply_text(
+                html_to_plain(text), disable_web_page_preview=True,
+            )
+
+    async def _edit(self, update: Update, message_id: int, text: str, parse_mode: ParseMode | None) -> Message:
+        """編輯訊息；HTML 解析失敗時改送純文字"""
+        bot = update.get_bot()
+        chat_id = update.effective_chat.id
+        try:
+            return await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id, text=text,
+                parse_mode=parse_mode, disable_web_page_preview=True,
+            )
+        except BadRequest as e:
+            if parse_mode is None or "can't parse entities" not in str(e).lower():
+                raise
+            logger.warning(f'HTML 解析失敗，改送純文字: {e}')
+            return await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id, text=html_to_plain(text),
+                disable_web_page_preview=True,
+            )
 
     async def send_status(
         self,
@@ -133,28 +217,21 @@ class BotHandler:
         parse_mode: ParseMode = ParseMode.HTML,
     ) -> Message | None:
         """發送或更新狀態訊息"""
-        chat_id = update.effective_chat.id
+        key = update.update_id
 
-        if chat_id in self._status_messages:
+        if key in self._status_messages:
             try:
-                msg = await update.get_bot().edit_message_text(
-                    chat_id=chat_id,
-                    message_id=self._status_messages[chat_id],
-                    text=text,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=True,
-                )
-                return msg
-            except Exception:
+                return await self._edit(update, self._status_messages[key], text, parse_mode)
+            except TelegramError:
                 # 編輯失敗則發送新訊息
                 pass
 
-        msg = await update.message.reply_text(
-            text,
-            parse_mode=parse_mode,
-            disable_web_page_preview=True,
-        )
-        self._status_messages[chat_id] = msg.message_id
+        try:
+            msg = await self._reply(update, text, parse_mode)
+        except TelegramError as e:
+            logger.warning(f'發送狀態訊息失敗: {e}')
+            return None
+        self._status_messages[key] = msg.message_id
         return msg
 
     async def send_final_response(
@@ -163,30 +240,22 @@ class BotHandler:
         text: str,
         parse_mode: ParseMode = ParseMode.HTML,
     ) -> Message | None:
-        """發送最終回覆 (替換狀態訊息)"""
-        chat_id = update.effective_chat.id
+        """發送最終回覆 (替換狀態訊息，過長自動分段)"""
+        status_id = self._status_messages.pop(update.update_id, None)
+        chunks = split_message(text)
+        msg = None
 
-        if chat_id in self._status_messages:
+        for i, chunk in enumerate(chunks):
             try:
-                msg = await update.get_bot().edit_message_text(
-                    chat_id=chat_id,
-                    message_id=self._status_messages[chat_id],
-                    text=text,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=True,
-                )
-                del self._status_messages[chat_id]
-                return msg
-            except Exception as e:
-                logger.warning(f'編輯訊息失敗，改發送新訊息: {e}')
-
-        msg = await update.message.reply_text(
-            text,
-            parse_mode=parse_mode,
-            disable_web_page_preview=True,
-        )
-        if chat_id in self._status_messages:
-            del self._status_messages[chat_id]
+                if i == 0 and status_id is not None:
+                    try:
+                        msg = await self._edit(update, status_id, chunk, parse_mode)
+                        continue
+                    except TelegramError as e:
+                        logger.warning(f'編輯訊息失敗，改發送新訊息: {e}')
+                msg = await self._reply(update, chunk, parse_mode)
+            except TelegramError as e:
+                logger.error(f'發送回覆失敗 (第 {i + 1}/{len(chunks)} 段): {e}')
         return msg
 
     async def send_error(
@@ -197,11 +266,27 @@ class BotHandler:
         """發送錯誤訊息"""
         await self.send_final_response(update, f'❌ <b>錯誤</b>\n\n{text}')
 
+    async def _ensure_authorized(self, update: Update) -> bool:
+        """檢查白名單，未授權則回覆並回傳 False"""
+        user_id = update.effective_user.id
+        if is_user_authorized(user_id):
+            return True
+        logger.debug(f'User {user_id} not authorized')
+        await self._reply(
+            update,
+            f'⛔ <b>存取受限</b>\n\n'
+            f'抱歉，您尚未加入授權白名單。\n'
+            f'您的 Telegram User ID：<code>{user_id}</code>\n\n'
+            f'請聯繫管理員將您的 ID 加入 <code>ALLOWED_USER_IDS</code>。',
+            ParseMode.HTML,
+        )
+        return False
+
     # === 指令處理器 ===
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """啟動指令"""
-        logger.info(f'[DEBUG] cmd_start called by user {update.effective_user.id}')
+        logger.debug(f'cmd_start called by user {update.effective_user.id}')
         user = update.effective_user
         welcome = (
             f'👋 <b>歡迎使用本地 AI 助理！</b>\n\n'
@@ -238,6 +323,8 @@ class BotHandler:
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """查詢額度"""
+        if not await self._ensure_authorized(update):
+            return
         user_id = update.effective_user.id
         status = get_quota_status(user_id)
 
@@ -253,6 +340,8 @@ class BotHandler:
 
     async def cmd_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """重置對話記憶"""
+        if not await self._ensure_authorized(update):
+            return
         user_id = update.effective_user.id
         clear_conversation_history(user_id)
         await update.message.reply_text(
@@ -262,17 +351,21 @@ class BotHandler:
 
     async def cmd_models(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """列出本地模型"""
+        if not await self._ensure_authorized(update):
+            return
         await self.send_status(update, '🔍 正在查詢本地 Ollama 模型...')
 
         try:
             models = await self.ollama_client.list_models()
             if not models:
-                await self.send_final_response(update, '⚠️ 本地無任何模型，請執行 <code>ollama pull <模型名></code>')
+                await self.send_final_response(
+                    update, '⚠️ 本地無任何模型 (或 Ollama 未啟動)，請執行 <code>ollama pull &lt;模型名&gt;</code>'
+                )
                 return
 
             lines = ['📦 <b>本地可用模型：</b>\n']
             for m in models:
-                name = m.get('name', '未知')
+                name = html.escape(m.get('name', '未知'))
                 size = m.get('size', 0)
                 size_gb = size / (1024**3)
                 modified = m.get('modified_at', '')[:10]
@@ -284,24 +377,15 @@ class BotHandler:
 
             await self.send_final_response(update, '\n'.join(lines))
         except Exception as e:
+            logger.exception('查詢模型失敗')
             await self.send_error(update, f'查詢模型失敗: {html.escape(str(e))}')
 
     async def cmd_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """搜尋指令"""
-        user_id = update.effective_user.id
-
-        # 檢查授權
-        if not is_user_authorized(user_id):
-            await self.send_error(update, '您未在授權白名單中')
+        if not await self._ensure_authorized(update):
             return
 
-        # 檢查額度
-        quota = check_and_consume_quota(user_id)
-        if not quota['allowed']:
-            await self.send_error(update, quota['message'])
-            return
-
-        # 取得查詢參數
+        # 先檢查參數，空查詢不扣額度
         query = ' '.join(context.args) if context.args else ''
         if not query:
             await update.message.reply_text(
@@ -310,17 +394,19 @@ class BotHandler:
             )
             return
 
+        quota = check_and_consume_quota(update.effective_user.id)
+        if not quota['allowed']:
+            await self.send_error(update, quota['message'])
+            return
+
         await self._process_query(update, query, quota, is_search_command=True)
 
     async def cmd_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """新聞指令"""
-        user_id = update.effective_user.id
-
-        if not is_user_authorized(user_id):
-            await self.send_error(update, '您未在授權白名單中')
+        if not await self._ensure_authorized(update):
             return
 
-        quota = check_and_consume_quota(user_id)
+        quota = check_and_consume_quota(update.effective_user.id)
         if not quota['allowed']:
             await self.send_error(update, quota['message'])
             return
@@ -336,8 +422,47 @@ class BotHandler:
         quota: dict,
         is_search_command: bool = False,
     ):
-        """處理使用者查詢 (含工具呼叫循環)"""
-        _debug_log(f'[DEBUG] _process_query started: query={user_query[:50]}')
+        """處理使用者查詢；失敗時回覆友善訊息並退還額度"""
+        user_id = update.effective_user.id
+        try:
+            await self._run_query(update, user_query, quota)
+        except httpx.TimeoutException:
+            logger.exception('Ollama 請求逾時')
+            refund_quota(user_id)
+            await self.send_error(
+                update, f'模型回應逾時 ({settings.OLLAMA_TIMEOUT} 秒)，請稍後再試或改問較短的問題。'
+            )
+        except httpx.HTTPError:
+            logger.exception('Ollama 連線失敗')
+            refund_quota(user_id)
+            await self.send_error(
+                update, '無法連線到本地模型，請確認 Ollama 已啟動 (<code>ollama serve</code>)。'
+            )
+        except Exception:
+            logger.exception('處理查詢失敗')
+            refund_quota(user_id)
+            await self.send_error(update, '處理您的問題時發生錯誤，請稍後再試。本次不計入額度。')
+        finally:
+            self._status_messages.pop(update.update_id, None)
+
+    async def _run_search_tool(self, func_args: dict) -> tuple[str, dict | None]:
+        """執行 search_web，回傳 (給模型的內容, 搜尋紀錄)；失敗不中斷工具循環"""
+        query = str(func_args.get('query', '')).strip()
+        if not query:
+            return '錯誤：search_web 需要 query 參數', None
+        logger.info(f'🔧 模型呼叫搜尋: "{query}"')
+        try:
+            results = await search(query, settings.SEARCH_MAX_RESULTS)
+        except Exception:
+            logger.exception(f'搜尋失敗: {query}')
+            return '（搜尋失敗，請根據既有知識回答並說明無法取得即時資料）', None
+        logger.debug(f'Search results count: {len(results)}')
+        formatted = format_results(results)
+        return formatted, {'query': query, 'results': results, 'formatted': formatted}
+
+    async def _run_query(self, update: Update, user_query: str, quota: dict):
+        """工具呼叫循環 + 最終回答"""
+        logger.debug(f'_process_query started: query={user_query[:50]}')
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username or '匿名'
 
@@ -346,7 +471,7 @@ class BotHandler:
 
         # 取得對話歷史
         history = get_conversation_history(user_id)
-        _debug_log(f'[DEBUG] History length: {len(history)}')
+        logger.debug(f'History length: {len(history)}')
 
         # 構建訊息
         messages = [{'role': 'system', 'content': SYSTEM_PROMPT}]
@@ -358,30 +483,28 @@ class BotHandler:
         tool_results = []
 
         for round_num in range(max_tool_rounds):
-            _debug_log(f'[DEBUG] Tool round {round_num + 1}')
-            # 呼叫 LLM
+            logger.debug(f'Tool round {round_num + 1}')
             response = await self.ollama_client.chat_with_tools(
                 messages=messages,
                 tools=[SEARCH_TOOL],
                 tool_choice='auto',
             )
-            _debug_log(f'[DEBUG] LLM response: {response}')
+            logger.debug(f'LLM response: {response}')
 
             message = response.get('message', {})
-            tool_calls = message.get('tool_calls', [])
-            _debug_log(f'[DEBUG] Tool calls: {tool_calls}')
+            tool_calls = message.get('tool_calls') or []
 
             if not tool_calls:
                 # 沒有工具呼叫，直接回覆
-                assistant_reply = message.get('content', '').strip()
-                _debug_log(f'[DEBUG] No tool calls, reply: {assistant_reply[:100] if assistant_reply else "empty"}')
+                assistant_reply = (message.get('content') or '').strip()
                 if assistant_reply:
                     await self._finalize_response(
                         update, user_id, user_name, user_query,
                         assistant_reply, tool_results, quota
                     )
                 else:
-                    await self.send_error(update, '模型未產生回覆')
+                    refund_quota(user_id)
+                    await self.send_error(update, '模型未產生回覆，本次不計入額度。')
                 return
 
             # 有工具呼叫 - 執行搜尋
@@ -390,7 +513,6 @@ class BotHandler:
             # 將 assistant 的工具呼叫加入訊息
             messages.append(message)
 
-            # 執行每個工具呼叫
             for tool_call in tool_calls:
                 func_name = tool_call.get('function', {}).get('name')
                 func_args = tool_call.get('function', {}).get('arguments', {})
@@ -401,35 +523,22 @@ class BotHandler:
                     except json.JSONDecodeError:
                         logger.warning(f'工具參數 JSON 解析失敗: {func_args!r}')
                         func_args = {}
+                if not isinstance(func_args, dict):
+                    func_args = {}
 
                 if func_name == 'search_web':
-                    query = func_args.get('query', '')
-                    _debug_log(f'[DEBUG] Model calling search: "{query}"')
-
-                    # 執行搜尋
-                    results = await search(query, settings.SEARCH_MAX_RESULTS)
-                    _debug_log(f'[DEBUG] Search results count: {len(results)}')
-                    formatted = format_results(results)
-
-                    tool_results.append({
-                        'query': query,
-                        'results': results,
-                        'formatted': formatted,
-                    })
-
-                    # 將工具結果加入訊息
-                    messages.append({
-                        'role': 'tool',
-                        'content': formatted,
-                        'tool_call_id': tool_call.get('id', ''),
-                    })
+                    content, record = await self._run_search_tool(func_args)
+                    if record:
+                        tool_results.append(record)
                 else:
                     logger.warning(f'未知工具: {func_name}')
-                    messages.append({
-                        'role': 'tool',
-                        'content': f'錯誤：未知工具 {func_name}',
-                        'tool_call_id': tool_call.get('id', ''),
-                    })
+                    content = f'錯誤：未知工具 {func_name}'
+
+                messages.append({
+                    'role': 'tool',
+                    'content': content,
+                    'tool_call_id': tool_call.get('id', ''),
+                })
 
         # 工具循環結束，取得最終回覆
         await self.send_status(update, '🧠 整理回答中...')
@@ -439,14 +548,15 @@ class BotHandler:
             tools=None,  # 最後一輪不需要工具
         )
 
-        assistant_reply = final_response.get('message', {}).get('content', '').strip()
+        assistant_reply = (final_response.get('message', {}).get('content') or '').strip()
         if assistant_reply:
             await self._finalize_response(
                 update, user_id, user_name, user_query,
                 assistant_reply, tool_results, quota
             )
         else:
-            await self.send_error(update, '模型未產生最終回覆')
+            refund_quota(user_id)
+            await self.send_error(update, '模型未產生最終回覆，本次不計入額度。')
 
     async def _finalize_response(
         self,
@@ -498,52 +608,51 @@ class BotHandler:
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """處理一般文字訊息"""
-        print(f'[DEBUG] handle_message called: user_id={update.effective_user.id}, text={update.message.text[:50] if update.message.text else "empty"}')
-        _debug_log(f'[DEBUG] handle_message called: user_id={update.effective_user.id}, text={update.message.text[:50] if update.message.text else "empty"}')
-        user_id = update.effective_user.id
+        user_query = (update.message.text or '').strip()
+        logger.debug(f'handle_message called: user_id={update.effective_user.id}, text={user_query[:50]}')
 
-        # 檢查授權
-        if not is_user_authorized(user_id):
-            _debug_log(f'[DEBUG] User {user_id} not authorized')
-            await update.message.reply_text(
-                f'⛔ <b>存取受限</b>\n\n'
-                f'抱歉，您尚未加入授權白名單。\n'
-                f'您的 Telegram User ID：<code>{user_id}</code>\n\n'
-                f'請聯繫管理員將您的 ID 加入 <code>ALLOWED_USER_IDS</code>。',
-                parse_mode=ParseMode.HTML,
-            )
+        if not await self._ensure_authorized(update):
             return
 
-        # 檢查額度
-        quota = check_and_consume_quota(user_id)
+        if not user_query:
+            return
+
+        quota = check_and_consume_quota(update.effective_user.id)
         if not quota['allowed']:
-            _debug_log(f'[DEBUG] User {user_id} quota exceeded')
             await self.send_error(update, quota['message'])
             return
 
-        # 處理查詢
-        user_query = update.message.text.strip()
-        _debug_log(f'[DEBUG] Processing query: {user_query[:50]}')
         await self._process_query(update, user_query, quota)
+
+    async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """全域錯誤處理：記錄堆疊，盡量回覆使用者"""
+        logger.error('未處理的例外', exc_info=context.error)
+        if isinstance(update, Update) and update.effective_message:
+            try:
+                await update.effective_message.reply_text('❌ 發生未預期的錯誤，請稍後再試。')
+            except TelegramError:
+                pass
 
 
 # 全域處理器實例
 bot_handler = BotHandler()
 
-def _debug_log(msg):
-    import logging
-    logging.getLogger(__name__).info(f'[DEBUG] {msg}')
 
 async def setup_bot() -> Application:
     """建立並設定 Telegram Bot Application"""
     # 初始化 Ollama
     await init_ollama()
 
-    # 建立 Application
-    application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+    # 建立 Application (concurrent_updates：多用戶同時提問不互相排隊)
+    application = (
+        Application.builder()
+        .token(settings.TELEGRAM_BOT_TOKEN)
+        .concurrent_updates(True)
+        .build()
+    )
 
     # 註冊指令
-    _debug_log('Registering handlers...')
+    logger.debug('Registering handlers...')
     application.add_handler(CommandHandler('start', bot_handler.cmd_start))
     application.add_handler(CommandHandler('help', bot_handler.cmd_help))
     application.add_handler(CommandHandler('status', bot_handler.cmd_status))
@@ -555,6 +664,9 @@ async def setup_bot() -> Application:
     # 註冊一般訊息處理
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot_handler.handle_message))
 
-    _debug_log('Handlers registered successfully')
+    # 全域錯誤處理
+    application.add_error_handler(bot_handler.on_error)
+
+    logger.debug('Handlers registered successfully')
 
     return application

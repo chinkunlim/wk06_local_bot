@@ -11,12 +11,33 @@ env_path = Path(__file__).parent.parent / '.env'
 if env_path.exists():
     load_dotenv(env_path)
 
+SUPPORTED_SEARCH_ENGINES = ('duckduckgo', 'google_news')
+
+
+def _parse_user_ids(raw: str) -> tuple[list[int], list[str]]:
+    """解析逗號分隔的 User ID，回傳 (有效 ID, 無效項目)"""
+    ids, invalid = [], []
+    for x in raw.split(','):
+        x = x.strip()
+        if not x:
+            continue
+        if x.lstrip('-').isdigit():
+            ids.append(int(x))
+        else:
+            invalid.append(x)
+    return ids, invalid
+
+
+_allowed_ids, _invalid_ids = _parse_user_ids(os.getenv('ALLOWED_USER_IDS', ''))
+
+
 class Settings:
+    # 注意：設定於啟動時讀取，修改 .env 後需重啟 Bot 才會生效
+
     # === Telegram Bot 設定 ===
     TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
-    ALLOWED_USER_IDS: list[int] = [
-        int(x.strip()) for x in os.getenv('ALLOWED_USER_IDS', '').split(',') if x.strip()
-    ]
+    ALLOWED_USER_IDS: list[int] = _allowed_ids
+    INVALID_USER_IDS: list[str] = _invalid_ids
 
     # === Ollama / 本地 LLM 設定 ===
     OLLAMA_BASE_URL: str = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
@@ -26,9 +47,11 @@ class Settings:
     # - command-r / command-r-plus
     OLLAMA_MODEL: str = os.getenv('OLLAMA_MODEL', 'llama3.1')
     OLLAMA_TIMEOUT: int = int(os.getenv('OLLAMA_TIMEOUT', '120'))  # 秒
+    # 上下文長度 (tokens)；Ollama 預設僅 2048~4096，容不下 system prompt + 歷史 + 搜尋結果
+    OLLAMA_NUM_CTX: int = int(os.getenv('OLLAMA_NUM_CTX', '8192'))
 
     # === 搜尋設定 ===
-    SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news_rss
+    SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news
     SEARCH_MAX_RESULTS: int = int(os.getenv('SEARCH_MAX_RESULTS', '4'))
     SEARCH_TIMEOUT: int = int(os.getenv('SEARCH_TIMEOUT', '15'))  # 秒
 
@@ -57,6 +80,12 @@ class Settings:
             errors.append('TELEGRAM_BOT_TOKEN 未設定')
         if not cls.ALLOWED_USER_IDS:
             errors.append('ALLOWED_USER_IDS 未設定 (至少需一個用戶 ID)')
+        if cls.INVALID_USER_IDS:
+            errors.append(f'ALLOWED_USER_IDS 含非數字項目: {", ".join(cls.INVALID_USER_IDS)}')
+        if cls.SEARCH_ENGINE not in SUPPORTED_SEARCH_ENGINES:
+            errors.append(
+                f'SEARCH_ENGINE={cls.SEARCH_ENGINE} 不支援 (可用: {" | ".join(SUPPORTED_SEARCH_ENGINES)})'
+            )
         return errors
 
 

@@ -60,12 +60,24 @@
 - **修復來源標題、使用者名稱未跳脫**：搜尋來源標題、`/start` 名稱、錯誤訊息改用 `html.escape`
 - **修復 Google News 實體解碼**：`decode_xml_entities` 原本為空操作，改用 `html.unescape`；`clean_html` 改為先解碼再移除標籤
 - **工具參數相容 JSON 字串**：`tool_calls[].function.arguments` 若為字串則 `json.loads`，解析失敗記錄警告
+- **修復長回覆發送失敗**：超過 Telegram 4096 字元上限時自動分段；HTML 解析失敗改送純文字
+- **修復錯誤時卡在「思考中」**：`_process_query` 捕獲 Ollama 逾時/連線錯誤並回覆友善訊息，失敗時退還額度 (`refund_quota`)；註冊全域 `error handler`
+- **修復多用戶排隊**：啟用 `concurrent_updates(True)`；狀態訊息改以 `update_id` 區分，避免同聊天室並發互相覆蓋
+- **修復上下文被截斷**：新增 `OLLAMA_NUM_CTX` (預設 8192)，`num_predict` 預設降為 2048
+- **修復網址被斜體破壞**：`markdown_to_html` 保護連結與純網址，`foo_bar_baz` 不再變成 `<i>`
+- **修復關鍵字提取誤刪字**：「和平」不再變「平」；保留 `C++`、`C#`、`llama3.1`
+- **修復 `/search` 空查詢扣額度**：先檢查參數再扣額度
+- **修復未授權可用指令**：`/status`、`/reset`、`/models` 加入白名單檢查
+- **修復無效 SEARCH_ENGINE 崩潰**：啟動時驗證 `SEARCH_ENGINE`、`ALLOWED_USER_IDS` 格式
+- **修復 LOG_LEVEL 無效**：日誌等級依 `.env`；除錯訊息改為 DEBUG 等級，移除 `print`
+- **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復 pytest 找不到測試**：`testpaths` 改為 `test`，加入 `pythonpath = ["."]`；移除測試中寫死的 `sys.path`
 
 ### 變更
 - 移除未使用依賴 `pydantic`、`pydantic-settings`、`lxml` (`uv remove`)
 - ruff 設定移至 `[tool.ruff.lint]`
 - 測試文件改用 `uv run` 指令
+- 文件更正：`.env` 修改皆需重啟生效 (原誤寫「即時生效」)
 
 ---
 

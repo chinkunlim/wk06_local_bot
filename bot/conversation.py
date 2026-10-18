@@ -199,6 +199,17 @@ def get_quota_status(user_id: int) -> dict[str, Any]:
     }
 
 
+def refund_quota(user_id: int):
+    """退還一次配額 (處理失敗時呼叫，避免使用者因系統錯誤被扣次數)"""
+    quota_key = f'{get_today_date_str()}_{user_id}'
+
+    with _quota_lock:
+        data = load_quota_data()
+        if data.get(quota_key, 0) > 0:
+            data[quota_key] -= 1
+            save_quota_data(data)
+
+
 def reset_user_quota(user_id: int):
     """重置特定使用者今日配額 (除錯用)"""
     today = get_today_date_str()

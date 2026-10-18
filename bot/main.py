@@ -1,18 +1,20 @@
 """
 本地 AI Telegram Bot - 主程式入口
-運行方式: python -m bot.main
+運行方式: uv run python -m bot.main
 """
 import asyncio
 import logging
 import sys
 from pathlib import Path
 
+from config.settings import settings
+
 # 設定日誌
 log_dir = Path(__file__).parent.parent / 'logs'
 log_dir.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format='%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
@@ -31,8 +33,7 @@ logger = logging.getLogger(__name__)
 
 async def main():
     """主程式"""
-    from bot.handler import _debug_log, setup_bot
-    from config.settings import settings
+    from bot.handler import setup_bot
 
     # 驗證設定
     errors = settings.validate()
@@ -66,12 +67,12 @@ async def main():
 
     try:
         # 開始 polling
-        _debug_log('Starting polling...')
+        logger.debug('Starting polling...')
         await application.updater.start_polling(
             allowed_updates=['message', 'callback_query'],
             drop_pending_updates=False,
         )
-        _debug_log('Polling started successfully')
+        logger.debug('Polling started successfully')
 
         # 保持運行
         while True:

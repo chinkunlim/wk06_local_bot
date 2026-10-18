@@ -47,8 +47,9 @@ def get_search_engine(engine_name: str = None) -> dict:
     _load_engines()
     name = engine_name or settings.SEARCH_ENGINE
     if name not in SEARCH_ENGINES:
-        logger.warning(f'未知搜尋引擎: {name}, 使用預設: {settings.SEARCH_ENGINE}')
-        name = settings.SEARCH_ENGINE
+        fallback = settings.SEARCH_ENGINE if settings.SEARCH_ENGINE in SEARCH_ENGINES else 'duckduckgo'
+        logger.warning(f'未知搜尋引擎: {name}, 改用: {fallback}')
+        name = fallback
     return SEARCH_ENGINES[name]
 
 
@@ -66,30 +67,19 @@ def format_results(results: list[dict], engine: str = None) -> str:
     return eng['format'](results)
 
 
-# 同步版本
-def search_sync(query: str, max_results: int = None, engine: str = None) -> list[dict]:
+# 同步版本 (僅供非 async 環境使用)
+def run_sync(coro):
+    """同步執行 coroutine；若已在 event loop 中則交給獨立執行緒，避免 RuntimeError"""
     import asyncio
-    import sys
-    if sys.version_info >= (3, 12):
-        # Python 3.12+ 使用 asyncio.run
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(search(query, max_results, engine))
-        # 已經在 loop 中，建立新 task
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, search(query, max_results, engine))
-            return future.result()
-    else:
-        # Python 3.11 及以下
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, search(query, max_results, engine))
-                    return future.result()
-        except RuntimeError:
-            pass
-        return asyncio.run(search(query, max_results, engine))
+    import concurrent.futures
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, coro).result()
+
+
+def search_sync(query: str, max_results: int = None, engine: str = None) -> list[dict]:
+    return run_sync(search(query, max_results, engine))

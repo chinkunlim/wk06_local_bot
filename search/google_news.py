@@ -165,6 +165,8 @@ def clean_html(raw: str) -> str:
     text = decode_xml_entities(raw)
     # 移除標籤
     text = re.sub(r'<[^>]+>', ' ', text)
+    # Google News 常見雙重編碼 (&amp;nbsp;)，再解碼一次
+    text = decode_xml_entities(text)
     # 正規化空白
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -196,10 +198,6 @@ def format_search_results(results: list[dict]) -> str:
 
 # 同步版本
 def search_google_news_sync(query: str, max_results: int = 4) -> list[dict]:
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(search_google_news(query, max_results))
+    """同步版本的搜尋"""
+    from search import run_sync
+    return run_sync(search_google_news(query, max_results))

@@ -171,6 +171,14 @@ MAX_DAILY_REQUESTS=100
 MAX_HISTORY_TURNS=6
 ```
 
+### 調整模型上下文長度
+Ollama 預設上下文僅 2048~4096 tokens，system prompt + 對話歷史 + 搜尋結果容易被截斷：
+```env
+OLLAMA_NUM_CTX=8192
+```
+
+> 所有 `.env` 設定皆於啟動時讀取，修改後需重啟 Bot。
+
 ## 🛠️ 開發指南
 
 ### 常用 uv 指令

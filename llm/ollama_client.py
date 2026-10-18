@@ -132,7 +132,7 @@ class OllamaClient:
         tools: list[dict] = None,
         tool_choice: str = 'auto',
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 2048,
     ) -> dict:
         """
         支援 Function Calling 的對話
@@ -147,6 +147,7 @@ class OllamaClient:
             'options': {
                 'temperature': temperature,
                 'num_predict': max_tokens,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
                 'top_k': 40,
                 'top_p': 0.95,
             },
@@ -175,7 +176,7 @@ class OllamaClient:
         messages: list[dict],
         tools: list[dict] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 2048,
     ) -> AsyncGenerator[str, None]:
         """
         串流對話 (不支援 Function Calling，僅用於最終回答生成)
@@ -189,6 +190,7 @@ class OllamaClient:
             'options': {
                 'temperature': temperature,
                 'num_predict': max_tokens,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
                 'top_k': 40,
                 'top_p': 0.95,
             },
