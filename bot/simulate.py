@@ -5,10 +5,10 @@
 
 走的是和 Telegram 完全相同的處理流程 (BotHandler._process_query：搜尋判斷 → 搜尋 → 讀網頁 → 回答)，
 只把「Telegram 送訊息進來 / 送回覆出去」換成終端機的輸入與輸出，所以不需要 Bot Token。
-對話歷史與額度記在模擬專用的使用者 ID 0，不影響真實使用者。
+對話歷史與額度記在模擬專用的使用者 ID 0，不影響真實使用者；每次啟動都是新的對話。
 """
-import asyncio
 import logging
+import readline  # noqa: F401  載入後 input() 才有正確的行內編輯 (中文輸入法、方向鍵、刪除)
 import sys
 import time
 from types import SimpleNamespace
@@ -76,6 +76,9 @@ async def run_simulation():
     logger.info(f'✅ 模型可以用了 ({time.monotonic() - start:.0f} 秒)。打一句話按 Enter，bot 會回；打 quit 結束。')
     print(HELP + '\n', flush=True)
 
+    # 每次啟動都是新的對話，避免上次模擬的內容混進回答
+    clear_conversation_history(SIM_USER_ID)
+
     bh = BotHandler()
     bh.ollama_client = client
 
@@ -91,7 +94,8 @@ async def run_simulation():
     count = 0
     while True:
         try:
-            text = (await asyncio.to_thread(input, '📱 你：')).strip()
+            # 在主執行緒讀取：readline 的行內編輯與 Ctrl+C 才能正常運作
+            text = input('📱 你：').strip()
         except EOFError:
             break
         if not text:
@@ -113,7 +117,8 @@ async def run_simulation():
             continue
 
         count += 1
-        logger.info(f'📩 收到文字 ({len(text)} 字)，交給 {client.model}…')
+        # 顯示程式實際收到的文字，若與畫面上打的不同可立即發現
+        logger.info(f'📩 收到：「{text}」({len(text)} 字)，交給 {client.model}…')
         await bh._process_query(_fake_update(count), text, quota)
 
     await client.close()

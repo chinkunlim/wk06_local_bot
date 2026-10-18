@@ -45,6 +45,8 @@ DEFAULT_CASES = [
     Case('台灣今天天氣如何？', expect_search=True),
     Case('那台北明天呢？', expect_search=True, new_session=False),
     Case('最近有什麼重大科技新聞？', expect_search=True),
+    # 地方資訊：小模型憑記憶容易張冠李戴，應搜尋
+    Case('介紹花蓮的5個景點', expect_search=True, must_contain=['花蓮']),
     # 特定人物的具體資料：需搜尋並讀取網頁內文才能完整列出 (同名同姓需依單位辨識)
     Case(
         '幫我查找東華大學，通識中心，同時也是資訊工程的陳文盛老師的課。有哪些。',
@@ -235,6 +237,7 @@ async def main() -> int:
 
     logging.basicConfig(level=logging.WARNING, format='  [%(levelname)s] %(name)s: %(message)s')
     logging.getLogger('ddgs').setLevel(logging.ERROR)
+    logging.getLogger('primp').setLevel(logging.WARNING)
 
     from config.settings import settings
 

@@ -31,6 +31,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 # ddgs 會記錄每個引擎的回應與失敗 (屬正常切換)，只保留真正錯誤
 logging.getLogger('ddgs').setLevel(logging.ERROR)
+logging.getLogger('primp').setLevel(logging.WARNING)  # ddgs 底層 HTTP 套件，會記錄每個引擎的回應
 logging.getLogger('telegram').setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
