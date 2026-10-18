@@ -56,11 +56,12 @@
 
 ### ISSUE-002: DuckDuckGo HTML 抓取易失效
 **現象**: 搜尋回傳空結果、或被導向驗證頁面 (CAPTCHA)。
-**原因**: DuckDuckGo 反爬蟲機制、HTML 結構變更。
-**規避**:
-- 切換 `SEARCH_ENGINE=google_news` (RSS 格式穩定)
-- 降低請求頻率 (單用戶低併發通常無問題)
-- 實作 User-Agent 輪換、Cookie 持久化 (待開發)
+**原因**: DuckDuckGo 反爬蟲機制 (同 IP 短時間大量請求時回傳 HTTP 202 + anomaly 驗證頁)、HTML 結構變更。
+**規避** (v1.0.3 起自動處理):
+- 偵測到驗證頁時，DuckDuckGo 暫停 10 分鐘 (`BLOCK_COOLDOWN_SECONDS`)，避免持續請求延長封鎖
+- 主引擎無結果時自動改用 `SEARCH_FALLBACK_ENGINE` (預設 `google_news`)，日誌顯示 `🚫` / `↪️`
+- 也可直接切換 `SEARCH_ENGINE=google_news` (RSS 格式穩定，但偏新聞)
+- 不繞過 CAPTCHA；大量測試 (如 `test/e2e_bot.py` 連跑) 容易觸發
 
 ### ISSUE-003: 長對話超出模型 Context Window
 **現象**: 對話歷史過長導致模型截斷、遺忘早期內容、報錯。
@@ -141,7 +142,7 @@
 | 017 | Google News XML 實體解碼錯誤 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
 | 018 | Markdown 解析器衝突 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
 | 019 | search_sync event loop 衝突 | 🔴 高 | ✅ **已修復** | 1.0.2 | - |
-| 002 | DuckDuckGo HTML 抓取易失效 | 🔴 高 | 規避中 | 1.1.0 | - |
+| 002 | DuckDuckGo HTML 抓取易失效 | 🔴 高 | 自動備援 (v1.0.3) | 1.1.0 | - |
 | 003 | Context Window 溢位 | 🔴 高 | 監控中 | 1.1.0 | - |
 | 004 | 無串流回覆 | 🟡 中 | 規劃中 | 1.2.0 | - |
 | 005 | 單執行緒阻塞 | 🟡 中 | ✅ **已修復** | 1.0.3 | - |

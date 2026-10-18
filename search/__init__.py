@@ -42,27 +42,52 @@ def _load_engines():
         SEARCH_ENGINES['google_news']['format'] = fmt_gn
 
 
-def get_search_engine(engine_name: str = None) -> dict:
-    """取得搜尋引擎"""
-    _load_engines()
+def _resolve_engine_name(engine_name: str = None) -> str:
     name = engine_name or settings.SEARCH_ENGINE
     if name not in SEARCH_ENGINES:
         fallback = settings.SEARCH_ENGINE if settings.SEARCH_ENGINE in SEARCH_ENGINES else 'duckduckgo'
         logger.warning(f'未知搜尋引擎: {name}, 改用: {fallback}')
         name = fallback
-    return SEARCH_ENGINES[name]
+    return name
+
+
+def get_search_engine(engine_name: str = None) -> dict:
+    """取得搜尋引擎"""
+    _load_engines()
+    return SEARCH_ENGINES[_resolve_engine_name(engine_name)]
+
+
+async def _search_with(name: str, query: str, max_results: int) -> list[dict]:
+    eng = get_search_engine(name)
+    logger.info(f'🔍 使用搜尋引擎: {eng["name"]}')
+    results = await eng['search'](query, max_results)
+    # 標記來源引擎，format_results 才能用對應格式
+    for r in results:
+        r['source_engine'] = name
+    return results
 
 
 async def search(query: str, max_results: int = None, engine: str = None) -> list[dict]:
-    """統一搜尋介面"""
-    eng = get_search_engine(engine)
+    """
+    統一搜尋介面
+    主引擎無結果 (含 DuckDuckGo 被機器人驗證擋下) 時，改用 SEARCH_FALLBACK_ENGINE
+    """
+    name = _resolve_engine_name(engine)
     max_r = max_results or settings.SEARCH_MAX_RESULTS
-    logger.info(f'🔍 使用搜尋引擎: {eng["name"]}')
-    return await eng['search'](query, max_r)
+    results = await _search_with(name, query, max_r)
+
+    fallback = settings.SEARCH_FALLBACK_ENGINE
+    if not results and fallback and fallback != name and fallback in SEARCH_ENGINES:
+        logger.warning(f'↪️ {name} 無結果，改用備援搜尋引擎: {fallback}')
+        results = await _search_with(fallback, query, max_r)
+
+    return results
 
 
 def format_results(results: list[dict], engine: str = None) -> str:
-    """統一格式化介面"""
+    """統一格式化介面 (未指定 engine 時依結果的來源引擎選擇格式)"""
+    if engine is None and results:
+        engine = results[0].get('source_engine')
     eng = get_search_engine(engine)
     return eng['format'](results)
 

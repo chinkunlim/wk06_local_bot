@@ -4,6 +4,7 @@ DuckDuckGo HTML 搜尋模組
 """
 import logging
 import re
+import time
 from urllib.parse import urljoin
 
 import httpx
@@ -16,6 +17,31 @@ logger = logging.getLogger(__name__)
 # DuckDuckGo 搜尋 URL
 DDG_HTML_URL = 'https://html.duckduckgo.com/html/'
 DDG_LITE_URL = 'https://duckduckgo.com/html/'
+
+# 被機器人驗證擋下後，暫停使用 DuckDuckGo 的秒數 (避免持續請求延長封鎖)
+BLOCK_COOLDOWN_SECONDS = 600
+_blocked_until = 0.0
+
+
+def is_blocked() -> bool:
+    """是否處於封鎖冷卻期"""
+    return time.monotonic() < _blocked_until
+
+
+def mark_blocked(seconds: float = BLOCK_COOLDOWN_SECONDS):
+    global _blocked_until
+    _blocked_until = time.monotonic() + seconds
+
+
+def is_challenge_page(status_code: int, text: str) -> bool:
+    """
+    判斷是否為機器人驗證頁
+    DuckDuckGo 限流時回傳 HTTP 202 + anomaly 頁面，而非搜尋結果
+    """
+    if 'result__body' in text:
+        return False
+    return status_code == 202 or 'anomaly' in text.lower()
+
 
 # 模擬瀏覽器的 User-Agent
 HEADERS = {
@@ -85,6 +111,11 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> list[dict]:
     if not keywords:
         keywords = query
 
+    if is_blocked():
+        remaining = int(_blocked_until - time.monotonic())
+        logger.info(f'⏸️ [DuckDuckGo] 封鎖冷卻中 (剩 {remaining} 秒)，略過')
+        return []
+
     logger.info(f'🔍 [DuckDuckGo] 搜尋關鍵字: "{keywords}"')
 
     async with httpx.AsyncClient(
@@ -100,6 +131,15 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> list[dict]:
             )
 
             response.raise_for_status()
+
+            if is_challenge_page(response.status_code, response.text):
+                mark_blocked()
+                logger.warning(
+                    f'🚫 [DuckDuckGo] 被機器人驗證擋下 (HTTP {response.status_code})，'
+                    f'{BLOCK_COOLDOWN_SECONDS // 60} 分鐘內暫停使用'
+                )
+                return []
+
             soup = BeautifulSoup(response.text, 'html.parser')
 
             results = []

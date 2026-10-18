@@ -299,6 +299,8 @@ A: 這是 ISSUE-016，已在 v1.0.2 修復。確保已更新 `search/duckduckgo.
 - 移除 `Accept-Encoding: br` (避免 Brotli 解壓失敗)
 - 選擇器簡化為 `.result__body` (避免重複)
 
+若日誌出現 `🚫 [DuckDuckGo] 被機器人驗證擋下 (HTTP 202)`，是短時間請求太多被限流 (ISSUE-002)。Bot 會自動冷卻 10 分鐘並改用 Google News (`SEARCH_FALLBACK_ENGINE`)，通常數分鐘到數小時後自動解除。
+
 ### Q: Google News 搜尋語法錯誤？
 A: 這是 ISSUE-017，已在 v1.0.2 修復 `search/google_news.py` 的 `decode_xml_entities` 函數。
 

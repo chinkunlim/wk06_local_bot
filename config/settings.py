@@ -53,6 +53,8 @@ class Settings:
 
     # === 搜尋設定 ===
     SEARCH_ENGINE: str = os.getenv('SEARCH_ENGINE', 'duckduckgo')  # duckduckgo | google_news
+    # 主引擎無結果或被封鎖時的備援引擎；設為空字串則停用
+    SEARCH_FALLBACK_ENGINE: str = os.getenv('SEARCH_FALLBACK_ENGINE', 'google_news')
     SEARCH_MAX_RESULTS: int = int(os.getenv('SEARCH_MAX_RESULTS', '4'))
     SEARCH_TIMEOUT: int = int(os.getenv('SEARCH_TIMEOUT', '15'))  # 秒
     # 搜尋判斷方式：
@@ -90,6 +92,11 @@ class Settings:
         if cls.SEARCH_DECISION not in SUPPORTED_SEARCH_DECISIONS:
             errors.append(
                 f'SEARCH_DECISION={cls.SEARCH_DECISION} 不支援 (可用: {" | ".join(SUPPORTED_SEARCH_DECISIONS)})'
+            )
+        if cls.SEARCH_FALLBACK_ENGINE and cls.SEARCH_FALLBACK_ENGINE not in SUPPORTED_SEARCH_ENGINES:
+            errors.append(
+                f'SEARCH_FALLBACK_ENGINE={cls.SEARCH_FALLBACK_ENGINE} 不支援 '
+                f'(可用: {" | ".join(SUPPORTED_SEARCH_ENGINES)}，或留空停用)'
             )
         if cls.SEARCH_ENGINE not in SUPPORTED_SEARCH_ENGINES:
             errors.append(

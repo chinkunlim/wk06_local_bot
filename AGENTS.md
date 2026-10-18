@@ -236,7 +236,7 @@ print(asyncio.run(search('test')))
 | 配額不重置 | 1. 檢查主機時區 `date` 2. `data/quota/quota.json` 手動刪除 3. 確認 `date.today()` 正確 |
 | 記憶體暴增 | 1. 檢查 `MAX_HISTORY_TURNS` 2. 確認 `data/cache/history/` 檔案大小 3. 重啟 Bot 釋放 |
 | `Conflict: terminated by other getUpdates request` | 1. `pkill -f "bot.main"` 停止所有實例 2. 執行 `deleteWebhook(drop_pending_updates=True)` 清理 pending updates |
-| DuckDuckGo 搜尋 0 結果 | 1. 確認 `search/duckduckgo.py` 移除 `Accept-Encoding: br` 2. 確認選擇器簡化為 `.result__body` 3. 手動測試 `search_duckduckgo_sync()` |
+| DuckDuckGo 搜尋 0 結果 | 0. 日誌出現 `🚫 被機器人驗證擋下` 為限流，會自動改用 Google News 並冷卻 10 分鐘 1. 確認 `search/duckduckgo.py` 移除 `Accept-Encoding: br` 2. 確認選擇器簡化為 `.result__body` 3. 手動測試 `search_duckduckgo_sync()` |
 | Google News 語法錯誤 | 1. 檢查 `search/google_news.py` 的 `decode_xml_entities` 是否使用 Unicode escape sequences |
 | Markdown 顯示異常 (粗體/程式碼異常) | 1. 確認 `bot/handler.py` 的 `markdown_to_html` 使用 placeholder 保護策略 |
 | `RuntimeError: This event loop is already running` | 1. 確認 `search/__init__.py` 的 `search_sync` 使用 `ThreadPoolExecutor` |
