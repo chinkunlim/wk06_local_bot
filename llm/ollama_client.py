@@ -41,7 +41,7 @@ SEARCH_TOOL = {
 }
 
 # 系統提示詞 ({today} 由 build_system_prompt 填入)
-SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理，請用清晰、有條理且自然的繁體中文回答。
+SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理，請用清晰、有條理且自然的繁體中文回答 (使用者要求翻譯或指定其他語言時，依其要求輸出)。
 今天日期：{today}
 
 【何時搜尋】
@@ -55,7 +55,8 @@ SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理，請用�
 - 若搜尋結果與問題無關，忽略它，改用自己的知識回答並說明無法取得即時資料
 
 【回答格式】
-- 重點用條列式與粗體標題
+- 直接回應使用者的要求，例如翻譯就只給譯文，計算就給算式與結果
+- 內容較多時，重點用條列式與粗體標題
 - 程式碼放在 ``` 程式碼區塊中
 """
 
@@ -162,7 +163,7 @@ class OllamaClient:
         messages: list[dict],
         tools: list[dict] = None,
         tool_choice: str = 'auto',
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_tokens: int = 2048,
     ) -> dict:
         """
@@ -242,7 +243,7 @@ class OllamaClient:
         self,
         messages: list[dict],
         tools: list[dict] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_tokens: int = 2048,
     ) -> AsyncGenerator[str, None]:
         """

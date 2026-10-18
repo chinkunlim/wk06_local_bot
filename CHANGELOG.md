@@ -72,6 +72,8 @@
 - **修復 LOG_LEVEL 無效**：日誌等級依 `.env`；除錯訊息改為 DEBUG 等級，移除 `print`
 - **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復模型每題都搜尋、照抄搜尋結果**：新增 `SEARCH_DECISION` (預設 `router`)，模型先輸出 JSON 判斷是否需要搜尋；system prompt 改為預設直接回答並加入今日日期 (ADR-014)
+- **修復翻譯題不翻譯、計算不穩定**：system prompt 允許依要求輸出其他語言；回答 temperature 0.7 → 0.3
+- **新增端對端輸出測試** `test/e2e_bot.py`：真實 Ollama + 搜尋跑完整流程，檢查搜尋判斷、HTML 合法性、禁用字樣，報告寫入 `logs/e2e_report.md`
 - **修復 OllamaClient 換 event loop 失效**：偵測 loop 變更時重建 httpx 連線池
 - **修復 pytest 找不到測試**：`testpaths` 改為 `test`，加入 `pythonpath = ["."]`；移除測試中寫死的 `sys.path`
 

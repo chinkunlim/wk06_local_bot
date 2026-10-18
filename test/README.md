@@ -36,6 +36,25 @@ uv run python test/test_settings.py
 | test_markdown.py | Markdown 解析器 (粗體、斜體、程式碼、連結等) | 同步 |
 | test_ollama.py | Ollama 連線、模型、對話、工具呼叫 | 非同步 |
 | test_conversation.py | 對話歷史、配額、授權、日誌 | 同步 |
+| test_handler_utils.py | Markdown/分段/關鍵字/錯誤處理/router (離線，mock Ollama) | 非同步 |
+| e2e_bot.py | **端對端輸出測試**：真實 Ollama + 搜尋跑完整流程，檢查是否該搜才搜、HTML 合法、禁用字樣 | 非同步 (非 pytest) |
+
+## 端對端輸出測試 (e2e_bot.py)
+
+不經 Telegram，直接跑 Bot 的真實流程並檢查回覆，不會寫入 `data/`：
+
+```bash
+# 內建 8 題 (是否搜尋、程式碼區塊、計算、翻譯、天氣追問、新聞)
+uv run python test/e2e_bot.py
+
+# 自訂問題 (依序執行並共用對話歷史，可測追問)
+uv run python test/e2e_bot.py "台灣今天天氣如何？" "那台北明天呢？" --full
+
+# 比較模型 / 搜尋判斷方式
+uv run python test/e2e_bot.py --model gemma4 --decision tools
+```
+
+完整輸出 (送往 Telegram 的 HTML) 寫在 `logs/e2e_report.md`。需 Ollama 已啟動 (`open -a Ollama`)。
 
 ## 開發指南
 

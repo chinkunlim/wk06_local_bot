@@ -17,6 +17,7 @@ TESTS = {
     'markdown': 'test_markdown.py',
     'ollama': 'test_ollama.py',
     'conversation': 'test_conversation.py',
+    'e2e': 'e2e_bot.py',
 }
 
 
@@ -56,7 +57,7 @@ async def main():
     args = sys.argv[1:] if len(sys.argv) > 1 else list(TESTS.keys())
 
     # 非同步測試
-    async_tests = ['search', 'ollama']
+    async_tests = ['search', 'ollama', 'e2e']
     # 同步測試
     sync_tests = ['settings', 'markdown', 'conversation']
 
