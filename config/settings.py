@@ -2,6 +2,7 @@
 本地 Bot 設定檔 - 從環境變數或 .env 讀取
 """
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -84,15 +85,18 @@ class Settings:
     WEBHOOK_HOST: str = os.getenv('WEBHOOK_HOST', '0.0.0.0')
 
     @classmethod
-    def validate(cls) -> list[str]:
-        """驗證必要設定"""
+    def validate(cls, require_telegram: bool = True) -> list[str]:
+        """驗證必要設定 (模擬模式不需要 Telegram 相關設定)"""
         errors = []
-        if not cls.TELEGRAM_BOT_TOKEN:
-            errors.append('TELEGRAM_BOT_TOKEN 未設定')
-        if not cls.ALLOWED_USER_IDS:
-            errors.append('ALLOWED_USER_IDS 未設定 (至少需一個用戶 ID)')
-        if cls.INVALID_USER_IDS:
-            errors.append(f'ALLOWED_USER_IDS 含非數字項目: {", ".join(cls.INVALID_USER_IDS)}')
+        if require_telegram:
+            if not cls.TELEGRAM_BOT_TOKEN:
+                errors.append('TELEGRAM_BOT_TOKEN 未設定')
+            elif not re.fullmatch(r'\d+:[A-Za-z0-9_-]{30,}', cls.TELEGRAM_BOT_TOKEN):
+                errors.append('TELEGRAM_BOT_TOKEN 格式不對 (應為「數字:一串英數字」，從 @BotFather 複製)')
+            if not cls.ALLOWED_USER_IDS:
+                errors.append('ALLOWED_USER_IDS 未設定 (至少需一個用戶 ID)')
+            if cls.INVALID_USER_IDS:
+                errors.append(f'ALLOWED_USER_IDS 含非數字項目: {", ".join(cls.INVALID_USER_IDS)}')
         if cls.SEARCH_DECISION not in SUPPORTED_SEARCH_DECISIONS:
             errors.append(
                 f'SEARCH_DECISION={cls.SEARCH_DECISION} 不支援 (可用: {" | ".join(SUPPORTED_SEARCH_DECISIONS)})'

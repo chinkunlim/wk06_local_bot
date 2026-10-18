@@ -1,13 +1,16 @@
 """
 本地 AI Telegram Bot - 主程式入口
-運行方式: uv run python -m bot.main
+運行方式:
+  uv run python -m bot.main              # 接 Telegram (Token 未設定時啟動會詢問，不存檔)
+  uv run python -m bot.main --simulate   # 模擬模式：終端機打字，不需要 Telegram
 """
 import asyncio
+import getpass
 import logging
 import sys
 from pathlib import Path
 
-from config.settings import settings
+from config.settings import Settings, _parse_user_ids, settings
 
 # 設定日誌
 log_dir = Path(__file__).parent.parent / 'logs'
@@ -33,17 +36,35 @@ logging.getLogger('telegram').setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def prompt_missing_secrets():
+    """
+    .env 沒有 Token / 白名單時，啟動當下詢問 (Token 用 getpass 不顯示在畫面)
+    只存在這次執行的記憶體裡，不寫進任何檔案
+    """
+    if not sys.stdin.isatty():
+        return
+    if not Settings.TELEGRAM_BOT_TOKEN:
+        token = getpass.getpass(
+            '🔑 請貼上 Telegram Bot Token (@BotFather 提供；貼上時畫面不會顯示，也不會存檔)：'
+        ).strip()
+        Settings.TELEGRAM_BOT_TOKEN = token
+    if not Settings.ALLOWED_USER_IDS and not Settings.INVALID_USER_IDS:
+        raw = input('👤 請輸入允許使用的 Telegram User ID (@userinfobot 可查，多個用逗號分隔)：')
+        Settings.ALLOWED_USER_IDS, Settings.INVALID_USER_IDS = _parse_user_ids(raw)
+
+
 async def main():
     """主程式"""
     from bot.handler import setup_bot
 
-    # 驗證設定
+    # 驗證設定 (缺 Token / 白名單時先詢問)
+    prompt_missing_secrets()
     errors = settings.validate()
     if errors:
         logger.error('❌ 設定錯誤:')
         for err in errors:
             logger.error(f'  - {err}')
-        logger.error('\n請複製 .env.example 為 .env 並填入必要資訊')
+        logger.error('請在 .env 設定，或啟動時依提示貼上 (不想存檔可留空)；只想在終端機測試請加 --simulate')
         sys.exit(1)
 
     logger.info('=' * 50)
@@ -92,7 +113,12 @@ async def main():
 
 
 if __name__ == '__main__':
+    if '--simulate' in sys.argv:
+        from bot.simulate import run_simulation
+        entry = run_simulation
+    else:
+        entry = main
     try:
-        asyncio.run(main())
+        asyncio.run(entry())
     except KeyboardInterrupt:
-        pass
+        print('\n👋 已停止')

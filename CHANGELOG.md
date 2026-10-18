@@ -73,6 +73,11 @@
 - **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復模型每題都搜尋、照抄搜尋結果**：新增 `SEARCH_DECISION` (預設 `router`)，模型先輸出 JSON 判斷是否需要搜尋；system prompt 改為預設直接回答並加入今日日期 (ADR-014)
 - **修復翻譯題不翻譯、計算不穩定**：system prompt 允許依要求輸出其他語言；回答 temperature 0.7 → 0.3
+- **新增模擬模式** `uv run python -m bot.main --simulate`：不接 Telegram，在終端機打字由本機模型回答，與 Telegram 走同一個處理流程 (作業關卡 A)
+- **回覆附上模型名稱與耗時**：例如「本地模型 llama3.1・10 秒・本日已提問: 3/50」
+- **Telegram「正在輸入…」狀態**：處理期間每 4 秒重送 typing 狀態
+- **Token 可在啟動時輸入**：`.env` 未設定 `TELEGRAM_BOT_TOKEN` / `ALLOWED_USER_IDS` 時於終端機詢問 (Token 不顯示、不存檔)；新增 Token 格式檢查
+- **README 新增 W6 回家作業說明**：怎麼裝、怎麼跑、相對老師範例改了什麼、實測秒數與卡關
 - **縮短回覆時間**：實測瓶頸為回答過長 (輸出約 23 tok/s)，要求清單精簡、不逐項附網址，回答 `num_predict` 上限 1024；115-1 課程題 72~108 秒降至約 40 秒
 - **修復 ddgs 天氣等查詢 0 筆**：排除 wikipedia/grokipedia 引擎 (region `tw-tzh` 會查詢不存在的網域)
 - **修復縮排子項目未轉換**：`\t*`、`  -` 開頭的子項目轉為 `◦`

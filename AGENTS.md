@@ -22,7 +22,8 @@
 | 模組路徑 | 職責定義 | 關鍵類別/函式 |
 |----------|----------|---------------|
 | `config/settings.py` | 環境變數載入、驗證、預設值管理 | `Settings` class, `settings` singleton |
-| `bot/main.py` | 程式入口、Application 生命週期、啟動檢查 | `main()`, `setup_bot()` |
+| `bot/main.py` | 程式入口、Application 生命週期、啟動檢查、缺 Token 時執行期詢問 | `main()`, `prompt_missing_secrets()` |
+| `bot/simulate.py` | 模擬模式 (`--simulate`)：終端機輸入、同一套 `_process_query` 流程 | `run_simulation()` |
 | `bot/handler.py` | Telegram 指令路由、訊息處理、工具呼叫循環 | `BotHandler` class, `cmd_*`, `handle_message`, `_process_query` |
 | `bot/conversation.py` | 對話歷史、白名單、配額、日誌 (JSON 持久化) | `get_conversation_history`, `save_conversation_turn`, `check_and_consume_quota`, `log_interaction` |
 | `llm/ollama_client.py` | Ollama REST API 封裝、Function Calling 支援 | `OllamaClient`, `chat_with_tools`, `chat_stream`, `SEARCH_TOOL` |

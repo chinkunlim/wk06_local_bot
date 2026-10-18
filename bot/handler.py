@@ -1,14 +1,16 @@
 """
 Telegram Bot 主處理器 - 整合對話、搜尋、LLM 呼叫
 """
+import asyncio
 import html
 import json
 import logging
 import re
+import time
 
 import httpx
 from telegram import Message, Update
-from telegram.constants import ParseMode
+from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
@@ -426,6 +428,7 @@ class BotHandler:
     ):
         """處理使用者查詢；失敗時回覆友善訊息並退還額度"""
         user_id = update.effective_user.id
+        typing = asyncio.create_task(self._keep_typing(update))
         try:
             await self._run_query(update, user_query, quota)
         except httpx.TimeoutException:
@@ -445,7 +448,21 @@ class BotHandler:
             refund_quota(user_id)
             await self.send_error(update, '處理您的問題時發生錯誤，請稍後再試。本次不計入額度。')
         finally:
+            typing.cancel()
             self._status_messages.pop(update.update_id, None)
+
+    async def _keep_typing(self, update: Update):
+        """處理期間持續顯示「正在輸入…」(Telegram 每次約維持 5 秒，需定期重送)"""
+        if not hasattr(update, 'get_bot'):
+            return  # 模擬模式 / 測試用的假 update
+        while True:
+            try:
+                await update.get_bot().send_chat_action(
+                    chat_id=update.effective_chat.id, action=ChatAction.TYPING
+                )
+            except TelegramError as e:
+                logger.debug(f'送出輸入中狀態失敗: {e}')
+            await asyncio.sleep(4)
 
     async def _run_search_tool(self, func_args: dict) -> tuple[str, dict | None]:
         """執行 search_web，回傳 (給模型的內容, 搜尋紀錄)；失敗不中斷工具循環"""
@@ -470,6 +487,7 @@ class BotHandler:
     async def _run_query(self, update: Update, user_query: str, quota: dict):
         """搜尋判斷 (router / tools) + 最終回答"""
         logger.debug(f'_process_query started: query={user_query[:50]}')
+        started = time.monotonic()
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username or '匿名'
 
@@ -505,7 +523,8 @@ class BotHandler:
             return
 
         await self._finalize_response(
-            update, user_id, user_name, user_query, reply, tool_results, quota
+            update, user_id, user_name, user_query, reply, tool_results, quota,
+            elapsed=time.monotonic() - started,
         )
 
     async def _router_search(
@@ -608,8 +627,9 @@ class BotHandler:
         assistant_reply: str,
         tool_results: list[dict],
         quota: dict,
+        elapsed: float | None = None,
     ):
-        """完成回覆：加上來源、額度、儲存歷史"""
+        """完成回覆：加上來源、模型與耗時、額度，並儲存歷史"""
 
         # 格式化來源
         sources_text = ''
@@ -625,7 +645,12 @@ class BotHandler:
                         sources_text += f'\n• <a href="{html.escape(url)}">{title}</a>'
 
         # 加上額度資訊
-        footer = f'\n\n<i>(本日已提問: {quota["current"]}/{quota["max"]})</i>'
+        timing = f'{elapsed:.0f} 秒・' if elapsed is not None else ''
+        model_name = html.escape(getattr(self.ollama_client, 'model', settings.OLLAMA_MODEL))
+        footer = (
+            f'\n\n<i>(本地模型 {model_name}・{timing}'
+            f'本日已提問: {quota["current"]}/{quota["max"]})</i>'
+        )
 
         # 轉換 Markdown 為 HTML
         formatted_reply = markdown_to_html(assistant_reply)
