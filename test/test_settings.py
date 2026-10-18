@@ -3,10 +3,11 @@
 設定檔測試
 """
 import sys
-import os
-sys.path.insert(0, '/Users/limchinkun/Desktop/wk06_bot_local')
+from pathlib import Path
 
-from config.settings import settings, Settings
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from config.settings import settings
 
 
 def test_settings_loading():

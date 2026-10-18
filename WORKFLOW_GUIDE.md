@@ -48,8 +48,8 @@ cp .env.example .env
 # 編輯 .env 填入 TELEGRAM_BOT_TOKEN、ALLOWED_USER_IDS
 
 # 啟動 Ollama 並拉取模型
-ollama serve &
-ollama pull qwen2.5  # 或 llama3.1
+open -a Ollama
+ollama pull llama3.1
 
 # 執行環境檢查
 uv run python check_env.py
@@ -91,11 +91,11 @@ uv run pytest -v
 # 全部測試
 uv run pytest
 
-# 單元測試 (快速)
-uv run pytest tests/unit -v
+# 離線單元測試 (快速)
+uv run pytest test/test_markdown.py test/test_conversation.py -v
 
-# 整合測試 (需 Ollama 運行)
-uv run pytest tests/integration -v
+# 整合測試 (需 Ollama 運行與網路)
+uv run pytest test/test_ollama.py test/test_search.py -v
 
 # 覆蓋率
 uv run pytest --cov=bot --cov=llm --cov=search --cov=config

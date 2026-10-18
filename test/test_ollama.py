@@ -4,9 +4,11 @@ Ollama Client 測試
 """
 import asyncio
 import sys
-sys.path.insert(0, '/Users/limchinkun/Desktop/wk06_bot_local')
+from pathlib import Path
 
-from llm.ollama_client import get_ollama_client, init_ollama, SYSTEM_PROMPT, SEARCH_TOOL
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from llm.ollama_client import SEARCH_TOOL, build_system_prompt, get_ollama_client, init_ollama
 
 
 async def test_connection():
@@ -43,7 +45,7 @@ async def test_chat_with_tools():
     client = get_ollama_client()
     response = await client.chat_with_tools(
         messages=[
-            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'system', 'content': build_system_prompt('tools')},
             {'role': 'user', 'content': '台灣今天天氣如何？'}
         ],
         tools=[SEARCH_TOOL],

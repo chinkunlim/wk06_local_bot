@@ -176,7 +176,7 @@ ollama pull command-r            # 專為 RAG/工具設計
 直接呼叫 Ollama REST API，不引入 LangChain/LlamaIndex。
 
 ### 理由
-- ✅ 依賴極少 (僅 httpx, pydantic)
+- ✅ 依賴極少 (僅 httpx)
 - ✅ 完全掌控提示詞、工具循環、錯誤處理
 - ✅ 避免框架抽象層帶來的除錯困難
 - ✅ 專案規模小，框架帶來的效益有限
@@ -284,6 +284,69 @@ Markdown 解析器中 inline code (`code`) 被斜體規則誤處理，導致 `__
 ### 理由
 - 避免在已有 event loop 中巢狀呼叫 `asyncio.run()`
 - 執行緒池隔離確保事件循環獨立
+
+---
+
+## ADR-014: 搜尋判斷改為 router 模式 (模型先輸出 JSON 決定是否搜尋)
+
+**日期**: 2026-10-18
+**狀態**: Accepted
+
+### 背景
+實測 14 題 (8 題不需搜尋、6 題需即時資料)，原生 Function Calling 下：
+- `llama3.1`：14 題全部呼叫 `search_web` (6/14)，連「你好」「123*456」都搜尋；調整 system prompt 與工具描述無效 (Ollama 的 llama3.1 模板在帶 tools 時會要求模型輸出函式呼叫)
+- `qwen2.5`：幾乎從不搜尋 (8/14)
+- `gemma4`：14/14，但每次判斷約 7 秒
+
+搜尋後模型還會照抄搜尋結果 (「我選擇結果 1」)，答非所問。
+
+### 決策
+新增 `SEARCH_DECISION=router|tools`，預設 `router`：
+1. `decide_search()` 以 `format` JSON schema 讓模型輸出 `{need_search, query}` (帶最近 2 輪對話以理解追問)
+2. 需要時執行搜尋，結果以 assistant `tool_calls` + `role: tool` 加入 messages
+3. 以 `tools=None` 產生最終回答
+
+保留原生 `tools` 模式給判斷能力足夠的模型 (如 gemma4)。System prompt 改為「預設直接回答」並加入今日日期。
+
+### 理由
+- router 在 `llama3.1`、`qwen2.5` 皆 14/14，每次判斷約 0.6 秒
+- 仍由模型自主決定是否搜尋與搜尋關鍵字，符合「非關鍵字硬編碼觸發」原則
+- 與模型的 tool calling 能力解耦，換模型不需重新調校
+
+### 後果
+- 每則訊息多一次短呼叫 (約 0.6 秒)
+- router 模式每次最多搜尋 1 次，不支援多輪補搜
+- 判斷規則集中在 `ROUTER_PROMPT`
+
+---
+
+## ADR-015: 搜尋後讀取網頁內文、備援改用 ddgs 多引擎
+
+**日期**: 2026-10-18
+**狀態**: Accepted
+
+### 背景
+測試「東華大學通識中心、資工的陳文盛老師開哪些課」：
+- 只給模型搜尋摘要 (一兩句)，回答只列出 1 門課，其餘「未知名稱」；但老師個人頁的「開設課程」段落有完整清單
+- router 規則未涵蓋「特定人物/單位的具體資料」，有時不搜尋而直接編造課程
+- DuckDuckGo 被限流時備援 Google News 只有新聞，這類問題只得到 1 則無關新聞
+
+### 決策
+1. router / tools 規則加入「特定人物、學校、公司、店家、產品的具體資料」與「使用者明確要求查詢」
+2. 新增 `search/page_fetch.py`：讀取前 `SEARCH_FETCH_PAGES` (預設 2) 筆結果網頁，依問題關鍵字 (含 2-gram) 挑選命中行及其後 3 行，摘錄至 `SEARCH_PAGE_CHARS` (預設 1500) 字
+3. 新增 `search/multi_engine.py` (ddgs 套件)，`SEARCH_FALLBACK_ENGINE` 預設改為 `ddgs`
+4. router 模式的回答階段 system prompt 不再描述 `search_web` (無工具可用時小模型會拒答)
+
+### 理由
+- 內文摘錄而非全文：頁首選單常佔前段，關鍵字挑選能在有限 context 內保留「開設課程」這類段落
+- ddgs 免 API Key、自動切換 Bing/Brave/Google/Mojeek/Yahoo 等引擎，實測 Brave 429、Google 403 時仍由 Mojeek/Yahoo 取得正確結果
+- 不採用付費/需金鑰 API (Tavily、Brave API) 以維持零 API Key 原則；SearXNG 需 Docker，留待日後
+
+### 後果
+- 需搜尋的問題多 1~3 秒讀取網頁
+- 新增依賴 `ddgs` (含 `primp`、`lxml`)
+- 各引擎皆為網頁抓取，大量請求仍可能被限流
+- 摘錄依關鍵字命中，若網頁用詞與問題差異大可能漏掉段落
 
 ---
 

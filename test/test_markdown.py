@@ -3,7 +3,9 @@
 Markdown 解析器測試
 """
 import sys
-sys.path.insert(0, '/Users/limchinkun/Desktop/wk06_bot_local')
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.handler import markdown_to_html
 
@@ -62,7 +64,7 @@ def test_complex():
     """複雜混合測試"""
     print("\n=== 複雜混合測試 ===")
     md = """**標題**
-    
+
 這是*斜體*和**粗體**文字。
 
 - 項目一
@@ -98,9 +100,11 @@ def test_html_escaping():
     print("\n=== HTML 跳脫測試 ===")
     md = "5 < 10 & 3 > 2"
     result = markdown_to_html(md)
-    assert '<' in result
-    assert '>' in result
-    assert '&' in result
+    assert result == "5 &lt; 10 &amp; 3 &gt; 2", f"跳脫錯誤: {result}"
+    # 程式碼內也需跳脫
+    assert markdown_to_html("`a<b>`") == "<code>a&lt;b&gt;</code>"
+    # Telegram 支援的標籤保留原樣
+    assert markdown_to_html("<b>粗</b>") == "<b>粗</b>"
     print(f"✅ HTML 跳脫: {result}")
 
 

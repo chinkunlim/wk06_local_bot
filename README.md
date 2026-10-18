@@ -2,6 +2,51 @@
 
 完全在本地運行的 Telegram Bot，使用 **Ollama** 運行開源模型，支援 **Function Calling (工具呼叫)** 自動搜尋網路資訊。
 
+## 📝 W6 回家作業說明 (Telegram 版)
+
+> 老師的範例是 LINE bot (`line_bot_lite.py`)；本專案用 **Telegram** 完成同樣的目標：bot 用跑在自己電腦上的模型回答問題，不需要雲端 AI 的金鑰。
+
+### 怎麼裝
+- macOS：`brew install --cask ollama`、`open -a Ollama`、`ollama pull llama3.1`
+- Python 用 [uv](https://docs.astral.sh/uv/) 管理：`uv sync`
+- 關卡 B 才需要：Telegram Bot Token (找 @BotFather)、自己的 Telegram User ID (找 @userinfobot)
+
+### 怎麼跑
+- **關卡 A 模擬** (不接 Telegram、不需要 Token)：
+  ```bash
+  uv run python -m bot.main --simulate
+  ```
+  在 `📱 你：` 後面打字，bot 用本機模型回答；`/reset` 清除記憶、`quit` 結束。
+- **關卡 B 真的接 Telegram**：
+  ```bash
+  uv run python -m bot.main
+  ```
+  `.env` 沒填 Token 時，啟動會詢問 (貼上時畫面不顯示，也不會存檔)。Telegram 用 long polling 主動拉訊息，**不需要 cloudflared 通道或 Webhook**。
+- 自動測試：`uv run pytest`、`uv run python test/e2e_bot.py` (真實模型 + 搜尋的端對端測試)
+
+### 我改了什麼 (相對於老師的 `line_bot_lite.py`)
+| 項目 | 老師的 line_bot_lite.py | 本專案 |
+|---|---|---|
+| 通訊平台 | LINE Webhook + cloudflared 通道 | Telegram long polling (不用開通道) |
+| 模型 | gemma4:e2b | llama3.1 (8B) |
+| 上網查 | 選做 `--search`，走 Ollama 線上搜尋 (要登入) | 預設開啟：DuckDuckGo，被擋時改用 ddgs 多引擎；會讀前 2 筆網頁內文 |
+| 何時搜尋 | 模型自己呼叫工具 | 模型先輸出 JSON 判斷要不要搜 (llama3.1 原生工具呼叫每題都搜，見 DECISIONS.md ADR-014) |
+| 對話記憶 | 無 | 最近 4 輪，`/reset` 清除 |
+| 金鑰與權限 | 啟動時貼通行碼 | Token 放 `.env` (不進版控) 或啟動時貼；白名單 + 每日額度 |
+| 回覆尾巴 | 模型名、秒數 | 模型名、秒數、今日額度、搜尋來源連結 |
+| 等待提示 | LINE「輸入中」動畫 | Telegram「正在輸入…」+ 進度訊息 (思考中 → 搜尋中 → 整理中) |
+| 模擬模式 | `--simulate` | `--simulate`，與 Telegram 走同一個處理流程 |
+
+### 跑起來怎樣
+- **模型**：llama3.1 (8B，4.9 GB)
+- **電腦**：Apple M5、16 GB 記憶體；沒有獨立顯示卡，Ollama 使用 M5 內建 GPU (`ollama ps` 顯示 100% GPU)
+- **一題約幾秒** (模擬模式實測)：打招呼 3 秒、常識題 2 秒、需要上網查的約 10 秒；要讀網頁並整理長清單的題目約 20–40 秒
+- **卡在哪 / 怎麼解決**：
+  1. llama3.1 只要給它工具，每題都會去搜尋 (連「你好」也搜) → 改成先讓模型判斷要不要搜
+  2. DuckDuckGo 短時間查太多次會回機器人驗證頁 → 偵測後暫停 10 分鐘，改用 ddgs 多引擎
+  3. 只看搜尋摘要時答案不完整 (例如老師開的課只列出一門) → 讀取網頁內文
+  4. 8B 小模型心算不穩 (123 × 456 偶爾算錯) → **尚未解決** (KNOWN_ISSUES.md ISSUE-020)
+
 ## ✨ 特色
 
 - 🏠 **100% 本地運行** - 無需雲端 API Key，資料不出本機
@@ -20,11 +65,14 @@
 ### 1. 安裝 Ollama 並拉取模型
 
 ```bash
-# 安裝 Ollama (Mac/Windows/Linux)
-curl -fsSL https://ollama.com/install.sh | sh
+# 安裝 Ollama (macOS 建議用 Homebrew 安裝桌面版，登入後自動常駐)
+brew install --cask ollama
+open -a Ollama
 
-# 啟動 Ollama 服務
-ollama serve
+# 確認服務 (應回傳 Ollama is running)
+curl http://127.0.0.1:11434
+
+# Linux 可改用官方腳本：curl -fsSL https://ollama.com/install.sh | sh && ollama serve
 
 # 拉取支援 Function Calling 的模型 (任選一)
 ollama pull llama3.1        # 推薦：Meta 官方，支援工具呼叫
@@ -116,7 +164,8 @@ wk06_bot_local/
 │   └── settings.py           # 設定管理 (從 .env 讀取)
 ├── bot/
 │   ├── __init__.py
-│   ├── main.py               # 程式入口
+│   ├── main.py               # 程式入口 (--simulate 為模擬模式)
+│   ├── simulate.py           # 模擬模式：終端機打字，不接 Telegram
 │   ├── handler.py            # Telegram 處理器 (指令、訊息、工具循環)
 │   └── conversation.py       # 對話歷史、配額、授權、日誌
 ├── llm/
@@ -161,6 +210,25 @@ SEARCH_ENGINE=duckduckgo
 SEARCH_ENGINE=google_news
 ```
 
+### 搜尋來源與網頁內文
+```env
+# DuckDuckGo 無結果或被限流時，改用 ddgs 多引擎 (Bing/Brave/Google/Mojeek/Yahoo 自動切換)
+SEARCH_FALLBACK_ENGINE=ddgs
+
+# 搜尋後讀取前 2 筆網頁內文，讓模型能完整回答 (例如老師開的全部課程)
+SEARCH_FETCH_PAGES=2
+SEARCH_PAGE_CHARS=2000
+```
+
+### 搜尋判斷方式
+```env
+# 預設：模型先判斷是否需要搜尋 (寫程式、翻譯、常識等直接回答，新聞/天氣/股價才搜)
+SEARCH_DECISION=router
+
+# 原生 Function Calling：需模型本身能判斷 (llama3.1 會每題都搜，建議搭配 gemma4)
+SEARCH_DECISION=tools
+```
+
 ### 調整配額
 ```env
 MAX_DAILY_REQUESTS=100
@@ -170,6 +238,14 @@ MAX_DAILY_REQUESTS=100
 ```env
 MAX_HISTORY_TURNS=6
 ```
+
+### 調整模型上下文長度
+Ollama 預設上下文僅 2048~4096 tokens，system prompt + 對話歷史 + 搜尋結果容易被截斷：
+```env
+OLLAMA_NUM_CTX=8192
+```
+
+> 所有 `.env` 設定皆於啟動時讀取，修改後需重啟 Bot。
 
 ## 🛠️ 開發指南
 
@@ -229,7 +305,7 @@ A:
 
 ### Q: 回覆很慢？
 A: 
-- 確認使用 GPU 加速：`OLLAMA_BASE_URL=http://localhost:11434` (預設會自動偵測 GPU)
+- 確認使用 GPU 加速：`OLLAMA_BASE_URL=http://127.0.0.1:11434` (預設會自動偵測 GPU)
 - 使用較小模型：`llama3.2:3b`、`qwen2.5:3b`、`gemma2:2b`
 - 調整 `OLLAMA_TIMEOUT`
 
@@ -278,6 +354,8 @@ asyncio.run(clear())
 A: 這是 ISSUE-016，已在 v1.0.2 修復。確保已更新 `search/duckduckgo.py`：
 - 移除 `Accept-Encoding: br` (避免 Brotli 解壓失敗)
 - 選擇器簡化為 `.result__body` (避免重複)
+
+若日誌出現 `🚫 [DuckDuckGo] 被機器人驗證擋下 (HTTP 202)`，是短時間請求太多被限流 (ISSUE-002)。Bot 會自動冷卻 10 分鐘並改用 Google News (`SEARCH_FALLBACK_ENGINE`)，通常數分鐘到數小時後自動解除。
 
 ### Q: Google News 搜尋語法錯誤？
 A: 這是 ISSUE-017，已在 v1.0.2 修復 `search/google_news.py` 的 `decode_xml_entities` 函數。

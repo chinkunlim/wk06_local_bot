@@ -4,9 +4,11 @@
 """
 import asyncio
 import sys
-sys.path.insert(0, '/Users/limchinkun/Desktop/wk06_bot_local')
+from pathlib import Path
 
-from search import search, format_results, search_sync
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from search import format_results, search, search_sync
 
 
 async def test_search_duckduckgo():

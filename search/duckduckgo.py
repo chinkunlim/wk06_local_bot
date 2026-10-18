@@ -2,12 +2,13 @@
 DuckDuckGo HTML 搜尋模組
 免費、無需 API Key、支援中文搜尋
 """
+import logging
 import re
+import time
+from urllib.parse import urljoin
+
 import httpx
 from bs4 import BeautifulSoup
-from typing import List, Dict, Optional
-from urllib.parse import quote_plus, urljoin
-import logging
 
 from config.settings import settings
 
@@ -16,6 +17,31 @@ logger = logging.getLogger(__name__)
 # DuckDuckGo 搜尋 URL
 DDG_HTML_URL = 'https://html.duckduckgo.com/html/'
 DDG_LITE_URL = 'https://duckduckgo.com/html/'
+
+# 被機器人驗證擋下後，暫停使用 DuckDuckGo 的秒數 (避免持續請求延長封鎖)
+BLOCK_COOLDOWN_SECONDS = 600
+_blocked_until = 0.0
+
+
+def is_blocked() -> bool:
+    """是否處於封鎖冷卻期"""
+    return time.monotonic() < _blocked_until
+
+
+def mark_blocked(seconds: float = BLOCK_COOLDOWN_SECONDS):
+    global _blocked_until
+    _blocked_until = time.monotonic() + seconds
+
+
+def is_challenge_page(status_code: int, text: str) -> bool:
+    """
+    判斷是否為機器人驗證頁
+    DuckDuckGo 限流時回傳 HTTP 202 + anomaly 頁面，而非搜尋結果
+    """
+    if 'result__body' in text:
+        return False
+    return status_code == 202 or 'anomaly' in text.lower()
+
 
 # 模擬瀏覽器的 User-Agent
 HEADERS = {
@@ -35,13 +61,16 @@ def extract_search_keywords(query: str) -> str:
     """
     if not query:
         return ''
-    
+
     # 移除指令前綴
     query = re.sub(r'^(/search|/news)\s*', '', query, flags=re.IGNORECASE).strip()
-    
-    # 將標點符號替換為空格
-    query = re.sub(r'[。，！？!?,\.\n/；;:：、～~—_()（）「」『』《》#@+=*&^%$]+', ' ', query)
-    
+
+    # 將標點符號替換為空格 (保留 C++、C#、llama3.1 這類詞內符號)
+    query = re.sub(r'[。，！？!?,\n/；;:：、～~—_()（）「」『』《》@=*&^%$]+', ' ', query)
+    query = re.sub(r'(?<!\w)\.|\.(?!\w)', ' ', query)
+    query = re.sub(r'(?<![\w+])\++', ' ', query)
+    query = re.sub(r'(?<!\w)#(?!\w)', ' ', query)
+
     # 移除常見提問贅詞
     stop_phrases = [
         '請問', '請告訴我', '我想知道', '你知道', '有沒有', '可以跟我說',
@@ -53,16 +82,15 @@ def extract_search_keywords(query: str) -> str:
         '今年的', '今年', '最近的', '最近', '最新的', '最新', '目前的', '目前', '現在',
         '新聞', '即時', '即時新聞',
     ]
-    
+
     for phrase in stop_phrases:
         query = re.sub(re.escape(phrase), ' ', query, flags=re.IGNORECASE)
-    
-    # 清理助詞
+
+    # 清理助詞：只移除獨立的助詞與句尾疑問詞，不從詞內剝字 (避免「和平」→「平」)
     particles = ['的', '了', '和', '與', '在', '之', '個', '嗎', '呢', '啊', '吧', '請']
-    words = query.split()
-    words = [w.strip(''.join(particles)) for w in words]
-    words = [w for w in words if w and w not in particles and len(w) > 0]
-    
+    words = [w.rstrip('嗎呢') for w in query.split()]
+    words = [w for w in words if w and w not in particles]
+
     # 去重並取前 5 個關鍵字
     unique_words = []
     seen = set()
@@ -70,11 +98,11 @@ def extract_search_keywords(query: str) -> str:
         if w.lower() not in seen:
             seen.add(w.lower())
             unique_words.append(w)
-    
+
     return ' '.join(unique_words[:5])
 
 
-async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
+async def search_duckduckgo(query: str, max_results: int = 4) -> list[dict]:
     """
     使用 DuckDuckGo HTML 版搜尋
     回傳格式: [{title, url, snippet}, ...]
@@ -82,16 +110,14 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
     keywords = extract_search_keywords(query)
     if not keywords:
         keywords = query
-    
+
+    if is_blocked():
+        remaining = int(_blocked_until - time.monotonic())
+        logger.info(f'⏸️ [DuckDuckGo] 封鎖冷卻中 (剩 {remaining} 秒)，略過')
+        return []
+
     logger.info(f'🔍 [DuckDuckGo] 搜尋關鍵字: "{keywords}"')
-    
-    params = {
-        'q': keywords,
-        'kl': 'tw-tw',  # 繁體中文台灣
-        'kp': '-1',     # 安全搜尋關閉
-        'df': '',       # 時間範圍不限制
-    }
-    
+
     async with httpx.AsyncClient(
         timeout=settings.SEARCH_TIMEOUT,
         headers=HEADERS,
@@ -103,48 +129,57 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
                 DDG_HTML_URL,
                 data={'q': keywords, 'kl': 'tw-tw'},
             )
-            
+
             response.raise_for_status()
+
+            if is_challenge_page(response.status_code, response.text):
+                mark_blocked()
+                logger.warning(
+                    f'🚫 [DuckDuckGo] 被機器人驗證擋下 (HTTP {response.status_code})，'
+                    f'{BLOCK_COOLDOWN_SECONDS // 60} 分鐘內暫停使用'
+                )
+                return []
+
             soup = BeautifulSoup(response.text, 'html.parser')
-            
+
             results = []
-            
+
             # 解析結果 - DuckDuckGo HTML 版的結構
             # 只使用 .result__body 避免重複選擇
             for result_div in soup.select('.result__body'):
                 # 標題與連結
                 title_elem = result_div.select_one('.result__title a, .result__url a, h2 a, .title a')
                 snippet_elem = result_div.select_one('.result__snippet, .snippet, .result__excerpt')
-                
+
                 if not title_elem:
                     continue
-                
+
                 title = title_elem.get_text(strip=True)
                 url = title_elem.get('href', '')
-                
+
                 # 處理相對連結
                 if url and not url.startswith('http'):
                     url = urljoin('https://duckduckgo.com', url)
-                
+
                 snippet = ''
                 if snippet_elem:
                     snippet = snippet_elem.get_text(strip=True)
                     if len(snippet) > 300:
                         snippet = snippet[:300] + '...'
-                
+
                 if title and url:
                     results.append({
                         'title': title,
                         'url': url,
                         'snippet': snippet
                     })
-                
+
                 if len(results) >= max_results:
                     break
-            
+
             logger.info(f'✅ [DuckDuckGo] 取得 {len(results)} 筆結果')
             return results
-            
+
         except httpx.TimeoutException:
             logger.error(f'❌ [DuckDuckGo] 搜尋逾時 ({settings.SEARCH_TIMEOUT}秒)')
             return []
@@ -153,29 +188,26 @@ async def search_duckduckgo(query: str, max_results: int = 4) -> List[Dict]:
             return []
 
 
-def format_search_results(results: List[Dict]) -> str:
+def format_search_results(results: list[dict]) -> str:
     """將搜尋結果格式化為給 LLM 參考的文字"""
     if not results:
         return '（無搜尋結果）'
-    
+
     lines = ['【即時搜尋結果】']
     for i, r in enumerate(results, 1):
         lines.append(f'\n【結果 {i}】')
         lines.append(f'標題：{r["title"]}')
         lines.append(f'網址：{r["url"]}')
-        if r['snippet']:
+        if r.get('snippet'):
             lines.append(f'摘要：{r["snippet"]}')
-    
+        if r.get('content'):
+            lines.append(f'內文摘錄：\n{r["content"]}')
+
     return '\n'.join(lines)
 
 
 # 同步版本 (供非 async 環境使用)
-def search_duckduckgo_sync(query: str, max_results: int = 4) -> List[Dict]:
+def search_duckduckgo_sync(query: str, max_results: int = 4) -> list[dict]:
     """同步版本的搜尋"""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(search_duckduckgo(query, max_results))
+    from search import run_sync
+    return run_sync(search_duckduckgo(query, max_results))

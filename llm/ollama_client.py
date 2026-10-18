@@ -1,10 +1,12 @@
 """
 Ollama Client - 支援 Function Calling / Tool Use
 """
+import asyncio
 import json
-import httpx
-from typing import List, Dict, Any, Optional, AsyncGenerator
 import logging
+from collections.abc import AsyncGenerator
+
+import httpx
 
 from config.settings import settings
 
@@ -20,7 +22,13 @@ SEARCH_TOOL = {
     'type': 'function',
     'function': {
         'name': 'search_web',
-        'description': '搜尋網路即時資訊。當使用者詢問最新新聞、即時股價、天氣、近期事件、特定人物最新動態等需要即時資料時，必須使用此工具。',
+        'description': (
+            '搜尋網路資訊。用於：即時資料 (新聞、今天/最近發生的事、天氣、股價、匯率、比賽結果)、'
+            '特定人物/學校/公司/店家/產品的具體資料 (開課、聯絡方式、價格、營業時間、規格)、'
+            '地方資訊 (景點、美食、住宿、交通、活動)，'
+            '以及使用者明確要求「查/搜尋/找」的內容。'
+            '程式、數學、翻譯、寫作、概念解釋、歷史常識、閒聊等問題請直接回答，不要呼叫此工具。'
+        ),
         'parameters': {
             'type': 'object',
             'properties': {
@@ -34,32 +42,78 @@ SEARCH_TOOL = {
     },
 }
 
-# 系統提示詞
-SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理。請以清晰、有條理且自然的繁體中文回答使用者的問題。
+# 系統提示詞 ({today}、{search_rules} 由 build_system_prompt 填入)
+SYSTEM_PROMPT = """你是專業、友善且樂於助人的智慧助理，請用清晰、有條理且自然的繁體中文回答 (使用者要求翻譯或指定其他語言時，依其要求輸出)。
+今天日期：{today}
 
-【可用工具】
-你可以使用 `search_web` 工具搜尋即時資訊。當遇到以下情況時，**必須**主動呼叫搜尋工具：
-1. 使用者詢問「最新」、「新聞」、「即時」、「今天」、「近期」等時效性關鍵字
-2. 詢問即時股價、匯率、天氣、賽事比分、選舉開票等動態數據
-3. 詢問特定人物/公司/產品的最新動態
-4. 你的內建知識無法回答或可能已過時的問題
+{search_rules}
 
-【工具使用原則】
-- 搜尋查詢請精簡，只保留核心關鍵字 (實體名詞、事件、數字)
-- 若搜尋結果不相關，可嘗試不同關鍵字再次搜尋
-- 獲得搜尋結果後，請**綜合分析並用自己的話回答**，**不要**在回答中包含來源引用、連結或參考文獻格式
-- 系統會自動在回答末尾附上參考來源
+【搜尋後如何回答】
+- 搜尋結果只是參考資料，請直接回答使用者原本的問題，用自己的話整理
+- 不要說「我選擇結果 1」、「根據搜尋結果」之類的話，也不要列出來源或連結 (系統會自動附上)
+- 搜尋結果含「內文摘錄」時以內文為準，完整列出相關項目 (例如全部課程)，不要只挑一兩項
+- 同名同姓時，只採用與使用者描述相符 (單位、系所) 的資料
+- 問題指定學期、年份或日期 (如 115-1、2026 年) 時，只列出符合該時間的資料，不要混入其他學期的舊資料
+- 若搜尋結果與問題無關，忽略它，改用自己的知識回答並說明無法取得即時資料
 
 【回答格式】
-- 使用條列式、粗體標題讓重點清晰
-- 直接回答問題，不需列出「資料來源：」或「參考來源：」等字樣
-- 系統會自動附上來源連結
+- 直接回應使用者的要求，例如翻譯就只給譯文
+- 數學計算先逐步列出過程 (例如把乘數拆開：123 × 456 = 123 × 400 + 123 × 56)，最後再給答案
+- 內容較多時，重點用條列式與粗體標題；清單每項一行為主，只補充使用者需要的細節
+- 不要在每一項附網址 (系統會在最後附來源)，保持精簡，避免冗長重複
+- 程式碼放在 ``` 程式碼區塊中
 """
+
+# tools 模式：模型自己決定何時呼叫 search_web
+SEARCH_RULES_TOOLS = """【何時搜尋】
+預設直接用你自己的知識回答。以下情況才呼叫 `search_web`：
+- 即時資料：新聞、今天/近期事件、天氣、股價、匯率、比賽結果
+- 特定對象的具體資料：某位老師開的課、某間學校/公司/店家的聯絡方式、價格、營業時間、產品規格 (你不可能確實知道，不要猜)
+- 地方資訊：某地的景點、美食、餐廳、住宿、交通、活動推薦
+- 使用者明確要求「幫我查」「搜尋」「找一下」
+- 不要搜尋：寫程式、數學計算、翻譯、寫作、解釋概念或原理、歷史與常識、打招呼閒聊、比較或分析使用者提供的內容"""
+
+# router 模式：搜尋已由 decide_search 決定，回答階段沒有工具可用
+# (若仍描述 search_web，小模型會以為該搜卻搜不到而拒答)
+SEARCH_RULES_ROUTER = """【搜尋】
+系統會在需要時先搜尋並把結果提供給你；沒有搜尋結果時，直接用你自己的知識完整回答。"""
+
+
+# 搜尋判斷 (router 模式)：先讓模型輸出 JSON 決定要不要搜尋，再回答
+# 部分模型 (如 llama3.1) 只要帶 tools 幾乎必定呼叫工具，無法自行判斷「不需要搜尋」
+ROUTER_PROMPT = """今天日期：{today}
+判斷回答使用者最新的問題是否需要上網搜尋即時資訊 (可參考前文理解指代)。
+需要搜尋 (need_search=true)：
+- 即時資料：新聞、今天/最近發生的事、天氣、股價、匯率、比賽結果
+- 特定人物、學校、公司、店家、產品的具體資料：開設課程、聯絡方式、價格、營業時間、規格、最新動態
+- 地方資訊：某地的景點、美食、餐廳、住宿、交通、活動推薦 (小模型對地方細節容易記錯)
+- 使用者明確要求「查」「搜尋」「找」
+不需要搜尋：寫程式、數學、翻譯、寫作、解釋概念、歷史常識、閒聊、分析使用者提供的內容。
+query 規則：保留能鎖定對象的專有名詞 (人名、單位、學校)，例如「東華大學 陳文盛 課程」。
+只輸出 JSON：{{"need_search": true 或 false, "query": "搜尋關鍵字，不需要時為空字串"}}"""
+
+ROUTER_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'need_search': {'type': 'boolean'},
+        'query': {'type': 'string'},
+    },
+    'required': ['need_search', 'query'],
+}
+
+
+def build_system_prompt(decision: str | None = None) -> str:
+    """產生含今日日期與搜尋規則的系統提示詞 (decision 預設依 SEARCH_DECISION)"""
+    from datetime import date
+
+    decision = decision or settings.SEARCH_DECISION
+    rules = SEARCH_RULES_TOOLS if decision == 'tools' else SEARCH_RULES_ROUTER
+    return SYSTEM_PROMPT.format(today=date.today().isoformat(), search_rules=rules)
 
 
 class OllamaClient:
     """Ollama API 客戶端，支援 Function Calling"""
-    
+
     def __init__(
         self,
         base_url: str = None,
@@ -69,21 +123,25 @@ class OllamaClient:
         self.base_url = base_url or settings.OLLAMA_BASE_URL
         self.model = model or settings.OLLAMA_MODEL
         self.timeout = timeout or settings.OLLAMA_TIMEOUT
-        self._client: Optional[httpx.AsyncClient] = None
-    
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
+
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        # 連線池綁定建立時的 event loop；換 loop (如 asyncio.run / 測試) 需重建
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or self._client_loop is not loop:
+            self._client_loop = loop
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
         return self._client
-    
+
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
-    
-    async def list_models(self) -> List[Dict]:
+
+    async def list_models(self) -> list[dict]:
         """列出本地可用模型"""
         client = await self._get_client()
         try:
@@ -94,12 +152,12 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'列出模型失敗: {e}')
             return []
-    
+
     async def check_model_exists(self) -> bool:
         """檢查指定模型是否存在"""
         models = await self.list_models()
         return any(self.model in m.get('name', '') for m in models)
-    
+
     async def pull_model(self) -> bool:
         """拉取模型 (若不存在)"""
         client = await self._get_client()
@@ -124,21 +182,21 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'拉取模型失敗: {e}')
             return False
-    
+
     async def chat_with_tools(
         self,
-        messages: List[Dict],
-        tools: List[Dict] = None,
+        messages: list[dict],
+        tools: list[dict] = None,
         tool_choice: str = 'auto',
-        temperature: float = 0.7,
-        max_tokens: int = 8192,
-    ) -> Dict:
+        temperature: float = 0.3,
+        max_tokens: int = 1024,
+    ) -> dict:
         """
         支援 Function Calling 的對話
         回傳: {'message': {...}, 'tool_calls': [...], 'usage': {...}}
         """
         client = await self._get_client()
-        
+
         payload = {
             'model': self.model,
             'messages': messages,
@@ -146,15 +204,16 @@ class OllamaClient:
             'options': {
                 'temperature': temperature,
                 'num_predict': max_tokens,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
                 'top_k': 40,
                 'top_p': 0.95,
             },
         }
-        
+
         if tools:
             payload['tools'] = tools
             payload['tool_choice'] = tool_choice
-        
+
         try:
             resp = await client.post(OLLAMA_API_CHAT, json=payload)
             resp.raise_for_status()
@@ -168,19 +227,55 @@ class OllamaClient:
         except Exception as e:
             logger.error(f'Ollama 請求失敗: {e}')
             raise
-    
+
+    async def decide_search(self, conversation: list[dict]) -> dict:
+        """
+        讓模型判斷是否需要搜尋 (router 模式)
+        conversation: 不含 system 的 user/assistant 訊息 (最後一則為使用者問題)
+        回傳: {'need_search': bool, 'query': str}；解析失敗視為不搜尋
+        """
+        from datetime import date
+
+        client = await self._get_client()
+        payload = {
+            'model': self.model,
+            'messages': [
+                {'role': 'system', 'content': ROUTER_PROMPT.format(today=date.today().isoformat())},
+                *conversation,
+            ],
+            'stream': False,
+            'format': ROUTER_SCHEMA,
+            'options': {
+                'temperature': 0,
+                'num_predict': 64,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
+            },
+        }
+        resp = await client.post(OLLAMA_API_CHAT, json=payload)
+        resp.raise_for_status()
+        content = resp.json().get('message', {}).get('content', '')
+        try:
+            data = json.loads(content)
+            return {
+                'need_search': bool(data.get('need_search')),
+                'query': str(data.get('query') or '').strip(),
+            }
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning(f'搜尋判斷 JSON 解析失敗，視為不搜尋: {content!r}')
+            return {'need_search': False, 'query': ''}
+
     async def chat_stream(
         self,
-        messages: List[Dict],
-        tools: List[Dict] = None,
-        temperature: float = 0.7,
-        max_tokens: int = 8192,
+        messages: list[dict],
+        tools: list[dict] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 2048,
     ) -> AsyncGenerator[str, None]:
         """
         串流對話 (不支援 Function Calling，僅用於最終回答生成)
         """
         client = await self._get_client()
-        
+
         payload = {
             'model': self.model,
             'messages': messages,
@@ -188,11 +283,12 @@ class OllamaClient:
             'options': {
                 'temperature': temperature,
                 'num_predict': max_tokens,
+                'num_ctx': settings.OLLAMA_NUM_CTX,
                 'top_k': 40,
                 'top_p': 0.95,
             },
         }
-        
+
         try:
             async with client.stream('POST', OLLAMA_API_CHAT, json=payload) as resp:
                 resp.raise_for_status()
@@ -212,7 +308,7 @@ class OllamaClient:
 
 
 # 全域單例
-_ollama_client: Optional[OllamaClient] = None
+_ollama_client: OllamaClient | None = None
 
 
 def get_ollama_client() -> OllamaClient:
@@ -225,7 +321,7 @@ def get_ollama_client() -> OllamaClient:
 async def init_ollama() -> OllamaClient:
     """初始化並檢查模型"""
     client = get_ollama_client()
-    
+
     # 檢查模型是否存在
     exists = await client.check_model_exists()
     if not exists:
@@ -233,6 +329,6 @@ async def init_ollama() -> OllamaClient:
         success = await client.pull_model()
         if not success:
             raise RuntimeError(f'無法取得模型 {client.model}，請手動執行: ollama pull {client.model}')
-    
+
     logger.info(f'✅ Ollama 就緒: {client.model} @ {client.base_url}')
     return client

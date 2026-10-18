@@ -1,15 +1,16 @@
 """
 搜尋引擎工廠 - 統一介面
 """
-from typing import List, Dict, Callable, Awaitable
-from config.settings import settings
 import logging
+from collections.abc import Awaitable, Callable
+
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 # 搜尋函數類型
-SearchFunc = Callable[[str, int], Awaitable[List[Dict]]]
-FormatFunc = Callable[[List[Dict]], str]
+SearchFunc = Callable[[str, int], Awaitable[list[dict]]]
+FormatFunc = Callable[[list[dict]], str]
 
 # 註冊的搜尋引擎
 SEARCH_ENGINES = {
@@ -23,70 +24,98 @@ SEARCH_ENGINES = {
         'search': None,
         'format': None,
     },
+    'ddgs': {
+        'name': 'ddgs 多引擎',
+        'search': None,
+        'format': None,
+    },
 }
 
 
 def _load_engines():
     """延遲載入搜尋模組 (避免循環導入)"""
     if SEARCH_ENGINES['duckduckgo']['search'] is None:
-        from search.duckduckgo import search_duckduckgo, format_search_results as fmt_ddg
+        from search.duckduckgo import format_search_results as fmt_ddg
+        from search.duckduckgo import search_duckduckgo
         SEARCH_ENGINES['duckduckgo']['search'] = search_duckduckgo
         SEARCH_ENGINES['duckduckgo']['format'] = fmt_ddg
-    
+
     if SEARCH_ENGINES['google_news']['search'] is None:
-        from search.google_news import search_google_news, format_search_results as fmt_gn
+        from search.google_news import format_search_results as fmt_gn
+        from search.google_news import search_google_news
         SEARCH_ENGINES['google_news']['search'] = search_google_news
         SEARCH_ENGINES['google_news']['format'] = fmt_gn
+
+    if SEARCH_ENGINES['ddgs']['search'] is None:
+        from search.multi_engine import format_search_results as fmt_multi
+        from search.multi_engine import search_ddgs
+        SEARCH_ENGINES['ddgs']['search'] = search_ddgs
+        SEARCH_ENGINES['ddgs']['format'] = fmt_multi
+
+
+def _resolve_engine_name(engine_name: str = None) -> str:
+    name = engine_name or settings.SEARCH_ENGINE
+    if name not in SEARCH_ENGINES:
+        fallback = settings.SEARCH_ENGINE if settings.SEARCH_ENGINE in SEARCH_ENGINES else 'duckduckgo'
+        logger.warning(f'未知搜尋引擎: {name}, 改用: {fallback}')
+        name = fallback
+    return name
 
 
 def get_search_engine(engine_name: str = None) -> dict:
     """取得搜尋引擎"""
     _load_engines()
-    name = engine_name or settings.SEARCH_ENGINE
-    if name not in SEARCH_ENGINES:
-        logger.warning(f'未知搜尋引擎: {name}, 使用預設: {settings.SEARCH_ENGINE}')
-        name = settings.SEARCH_ENGINE
-    return SEARCH_ENGINES[name]
+    return SEARCH_ENGINES[_resolve_engine_name(engine_name)]
 
 
-async def search(query: str, max_results: int = None, engine: str = None) -> List[Dict]:
-    """統一搜尋介面"""
-    eng = get_search_engine(engine)
-    max_r = max_results or settings.SEARCH_MAX_RESULTS
+async def _search_with(name: str, query: str, max_results: int) -> list[dict]:
+    eng = get_search_engine(name)
     logger.info(f'🔍 使用搜尋引擎: {eng["name"]}')
-    return await eng['search'](query, max_r)
+    results = await eng['search'](query, max_results)
+    # 標記來源引擎，format_results 才能用對應格式
+    for r in results:
+        r['source_engine'] = name
+    return results
 
 
-def format_results(results: List[Dict], engine: str = None) -> str:
-    """統一格式化介面"""
+async def search(query: str, max_results: int = None, engine: str = None) -> list[dict]:
+    """
+    統一搜尋介面
+    主引擎無結果 (含 DuckDuckGo 被機器人驗證擋下) 時，改用 SEARCH_FALLBACK_ENGINE
+    """
+    name = _resolve_engine_name(engine)
+    max_r = max_results or settings.SEARCH_MAX_RESULTS
+    results = await _search_with(name, query, max_r)
+
+    fallback = settings.SEARCH_FALLBACK_ENGINE
+    if not results and fallback and fallback != name and fallback in SEARCH_ENGINES:
+        logger.warning(f'↪️ {name} 無結果，改用備援搜尋引擎: {fallback}')
+        results = await _search_with(fallback, query, max_r)
+
+    return results
+
+
+def format_results(results: list[dict], engine: str = None) -> str:
+    """統一格式化介面 (未指定 engine 時依結果的來源引擎選擇格式)"""
+    if engine is None and results:
+        engine = results[0].get('source_engine')
     eng = get_search_engine(engine)
     return eng['format'](results)
 
 
-# 同步版本
-def search_sync(query: str, max_results: int = None, engine: str = None) -> List[Dict]:
+# 同步版本 (僅供非 async 環境使用)
+def run_sync(coro):
+    """同步執行 coroutine；若已在 event loop 中則交給獨立執行緒，避免 RuntimeError"""
     import asyncio
-    import sys
-    if sys.version_info >= (3, 12):
-        # Python 3.12+ 使用 asyncio.run
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(search(query, max_results, engine))
-        # 已經在 loop 中，建立新 task
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, search(query, max_results, engine))
-            return future.result()
-    else:
-        # Python 3.11 及以下
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, search(query, max_results, engine))
-                    return future.result()
-        except RuntimeError:
-            pass
-        return asyncio.run(search(query, max_results, engine))
+    import concurrent.futures
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, coro).result()
+
+
+def search_sync(query: str, max_results: int = None, engine: str = None) -> list[dict]:
+    return run_sync(search(query, max_results, engine))
