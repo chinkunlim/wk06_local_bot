@@ -193,3 +193,8 @@ async def test_router_with_search(monkeypatch):
     roles = [m['role'] for m in calls[0]['messages']]
     assert roles[-2:] == ['assistant', 'tool']
     assert finals and '搜尋來源' in finals[0] and 'https://example.com' in finals[0]
+
+
+def test_nested_bullets():
+    md = '1. 課程\n\t* 週一 第 8–10 節\n    - 理工二館\n* 頂層'
+    assert markdown_to_html(md) == '1. 課程\n    ◦ 週一 第 8–10 節\n    ◦ 理工二館\n• 頂層'

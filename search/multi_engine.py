@@ -2,6 +2,7 @@
 多引擎網頁搜尋模組 (ddgs 套件)
 免 API Key，自動在 Bing、Brave、DuckDuckGo、Google、Mojeek 等引擎間切換，
 單一引擎被限流時仍可取得結果；作為 DuckDuckGo HTML 的備援
+(排除 wikipedia / grokipedia：百科類只回一筆詞條，且 region=tw-tzh 會查詢不存在的 tzh.wikipedia.org)
 """
 import asyncio
 import logging
@@ -14,6 +15,9 @@ from search.duckduckgo import extract_search_keywords
 
 logger = logging.getLogger(__name__)
 
+# 一般網頁搜尋引擎 (ddgs 會依序嘗試，失敗自動換下一個)
+WEB_BACKENDS = 'brave,google,mojeek,yahoo,startpage,duckduckgo'
+
 
 def _search_blocking(keywords: str, max_results: int) -> list[dict]:
     raw = DDGS(timeout=settings.SEARCH_TIMEOUT).text(
@@ -21,7 +25,7 @@ def _search_blocking(keywords: str, max_results: int) -> list[dict]:
         region='tw-tzh',
         safesearch='off',
         max_results=max_results,
-        backend='auto',
+        backend=WEB_BACKENDS,
     )
     results = []
     for r in raw:

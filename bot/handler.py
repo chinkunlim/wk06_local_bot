@@ -105,8 +105,9 @@ def markdown_to_html(text: str) -> str:
     # 標題 # text -> <b>text</b>
     text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
 
-    # 項目符號 - 或 * 開頭
-    text = re.sub(r'^[\*\-\+]\s+(.+)$', r'• \1', text, flags=re.MULTILINE)
+    # 項目符號 - * + 開頭；有縮排 (空白或 tab) 的視為子項目
+    text = re.sub(r'^[\*\-\+][ \t]+(.+)$', r'• \1', text, flags=re.MULTILINE)
+    text = re.sub(r'^[ \t]+[\*\-\+][ \t]+(.+)$', r'    ◦ \1', text, flags=re.MULTILINE)
 
     # 分割線
     text = re.sub(r'^---+$', '──────────────', text, flags=re.MULTILINE)

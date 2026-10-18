@@ -73,6 +73,9 @@
 - **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復模型每題都搜尋、照抄搜尋結果**：新增 `SEARCH_DECISION` (預設 `router`)，模型先輸出 JSON 判斷是否需要搜尋；system prompt 改為預設直接回答並加入今日日期 (ADR-014)
 - **修復翻譯題不翻譯、計算不穩定**：system prompt 允許依要求輸出其他語言；回答 temperature 0.7 → 0.3
+- **縮短回覆時間**：實測瓶頸為回答過長 (輸出約 23 tok/s)，要求清單精簡、不逐項附網址，回答 `num_predict` 上限 1024；115-1 課程題 72~108 秒降至約 40 秒
+- **修復 ddgs 天氣等查詢 0 筆**：排除 wikipedia/grokipedia 引擎 (region `tw-tzh` 會查詢不存在的網域)
+- **修復縮排子項目未轉換**：`\t*`、`  -` 開頭的子項目轉為 `◦`
 - **改善網頁內文摘錄**：全文放得下就全給；關鍵字不再拆出「11」「15」等數字片段；超過上限時依序保留命中行、短行 (標題/清單)、長段落；`SEARCH_PAGE_CHARS` 預設 2000；指定學期時只列出該學期資料
 - **搜尋後讀取網頁內文**：讀取前 2 筆結果網頁，依問題關鍵字摘錄相關段落給模型，回答更完整 (`SEARCH_FETCH_PAGES`、`SEARCH_PAGE_CHARS`)
 - **新增 ddgs 多引擎搜尋**並設為預設備援 (`SEARCH_FALLBACK_ENGINE=ddgs`)，取代只有新聞的 Google News
