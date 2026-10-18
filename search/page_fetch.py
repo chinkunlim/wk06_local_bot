@@ -27,6 +27,8 @@ SKIP_EXTENSIONS = ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.
 MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024
 # 命中行之後一併保留的行數 (例如「開設課程」標題後接課程清單)
 CONTEXT_LINES = 3
+# 短行 (標題、清單項目) 的長度門檻
+SHORT_LINE = 60
 
 
 def is_fetchable(url: str) -> bool:
@@ -57,45 +59,66 @@ def html_to_lines(html: bytes | str) -> list[str]:
 
 
 def query_keywords(query: str) -> list[str]:
-    """問題關鍵字：原詞 + 長詞的 2-gram (中文無空白斷詞，例如「陳文盛老師」也能命中「陳文盛」)"""
-    words = [w for w in re.split(r'\s+', query) if len(w) >= 2]
-    keywords = set(words)
-    for w in words:
-        if len(w) >= 3:
-            keywords.update(w[i:i + 2] for i in range(len(w) - 1))
+    """
+    問題關鍵字 (中文無空白斷詞)：
+    - 英數詞整段保留，例如「115-1」「Python」
+    - 中文連續字串保留原詞並拆成 2-gram，例如「陳文盛老師」也能命中「陳文盛」
+    不拆英數字，避免「11」「15」這類片段命中所有含數字的段落
+    """
+    keywords: set[str] = set()
+    for run in re.findall(r'[A-Za-z0-9][A-Za-z0-9.\-+#]*', query):
+        if len(run) >= 2:
+            keywords.add(run)
+    for run in re.findall(r'[\u4e00-\u9fff]+', query):
+        if len(run) >= 2:
+            keywords.add(run)
+        if len(run) >= 3:
+            keywords.update(run[i:i + 2] for i in range(len(run) - 1))
     return sorted(keywords, key=len, reverse=True)
 
 
 def extract_relevant_text(lines: list[str], query: str, max_chars: int) -> str:
     """
-    依關鍵字命中程度挑選段落：每個命中行連同其後 CONTEXT_LINES 行為一段，
-    命中越多 (越長的關鍵字權重越高) 越優先，最後依原文順序組合
+    在字數上限內挑選內文，依原文順序組合：
+    1. 全文放得下就全給
+    2. 命中關鍵字的行 (越長的關鍵字權重越高) 連同其後 CONTEXT_LINES 個短行
+    3. 其餘短行：標題、清單項目、課程名稱多為短行，即使沒命中關鍵字也常是答案
+    4. 其餘長段落 (公告、內文)
     """
+    full = '\n'.join(lines)
+    if len(full) <= max_chars:
+        return full
+
     keywords = query_keywords(query)
-    if not keywords:
-        return '\n'.join(lines)[:max_chars]
-
-    scored = []
-    for i, line in enumerate(lines):
-        score = sum(len(k) for k in keywords if k in line)
-        if score:
-            scored.append((score, i))
-
-    if not scored:
-        return '\n'.join(lines)[:max_chars]
+    scores = [sum(len(k) for k in keywords if k in line) for line in lines]
 
     chosen: set[int] = set()
     total = 0
-    for _, i in sorted(scored, key=lambda x: (-x[0], x[1])):
-        for j in range(i, min(i + 1 + CONTEXT_LINES, len(lines))):
-            if j in chosen:
-                continue
-            if total + len(lines[j]) + 1 > max_chars:
-                break
-            chosen.add(j)
-            total += len(lines[j]) + 1
-        if total >= max_chars:
-            break
+
+    def take(j: int) -> bool:
+        nonlocal total
+        if j in chosen:
+            return True
+        cost = len(lines[j]) + 1
+        if total + cost > max_chars:
+            return False
+        chosen.add(j)
+        total += cost
+        return True
+
+    matched = sorted((i for i, sc in enumerate(scores) if sc), key=lambda i: (-scores[i], i))
+    for i in matched:
+        take(i)
+        for j in range(i + 1, min(i + 1 + CONTEXT_LINES, len(lines))):
+            if len(lines[j]) <= SHORT_LINE:
+                take(j)
+
+    for j, line in enumerate(lines):
+        if len(line) <= SHORT_LINE:
+            take(j)
+
+    for j in range(len(lines)):
+        take(j)
 
     return '\n'.join(lines[j] for j in sorted(chosen))
 

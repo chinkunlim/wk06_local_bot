@@ -73,6 +73,7 @@
 - **修復 `*_sync` 使用已棄用的 `get_event_loop`**：統一使用 `search.run_sync`
 - **修復模型每題都搜尋、照抄搜尋結果**：新增 `SEARCH_DECISION` (預設 `router`)，模型先輸出 JSON 判斷是否需要搜尋；system prompt 改為預設直接回答並加入今日日期 (ADR-014)
 - **修復翻譯題不翻譯、計算不穩定**：system prompt 允許依要求輸出其他語言；回答 temperature 0.7 → 0.3
+- **改善網頁內文摘錄**：全文放得下就全給；關鍵字不再拆出「11」「15」等數字片段；超過上限時依序保留命中行、短行 (標題/清單)、長段落；`SEARCH_PAGE_CHARS` 預設 2000；指定學期時只列出該學期資料
 - **搜尋後讀取網頁內文**：讀取前 2 筆結果網頁，依問題關鍵字摘錄相關段落給模型，回答更完整 (`SEARCH_FETCH_PAGES`、`SEARCH_PAGE_CHARS`)
 - **新增 ddgs 多引擎搜尋**並設為預設備援 (`SEARCH_FALLBACK_ENGINE=ddgs`)，取代只有新聞的 Google News
 - **修復查詢特定人物/單位時不搜尋而編造**：router 與工具規則加入「特定對象的具體資料」「使用者要求查詢」

@@ -58,7 +58,7 @@ class Settings:
     # 搜尋後讀取前 N 筆結果的網頁內文給模型 (0 = 只用搜尋摘要)
     SEARCH_FETCH_PAGES: int = int(os.getenv('SEARCH_FETCH_PAGES', '2'))
     # 每頁內文摘錄上限字數 (受 OLLAMA_NUM_CTX 限制，過大會擠掉對話歷史)
-    SEARCH_PAGE_CHARS: int = int(os.getenv('SEARCH_PAGE_CHARS', '1500'))
+    SEARCH_PAGE_CHARS: int = int(os.getenv('SEARCH_PAGE_CHARS', '2000'))
     SEARCH_MAX_RESULTS: int = int(os.getenv('SEARCH_MAX_RESULTS', '4'))
     SEARCH_TIMEOUT: int = int(os.getenv('SEARCH_TIMEOUT', '15'))  # 秒
     # 搜尋判斷方式：

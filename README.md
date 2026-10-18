@@ -171,7 +171,7 @@ SEARCH_FALLBACK_ENGINE=ddgs
 
 # 搜尋後讀取前 2 筆網頁內文，讓模型能完整回答 (例如老師開的全部課程)
 SEARCH_FETCH_PAGES=2
-SEARCH_PAGE_CHARS=1500
+SEARCH_PAGE_CHARS=2000
 ```
 
 ### 搜尋判斷方式

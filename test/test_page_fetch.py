@@ -62,6 +62,30 @@ def test_extract_keeps_course_section_within_budget():
     assert '中級程式設計-Python' in excerpt
 
 
+def test_query_keywords_no_digit_fragments():
+    kws = query_keywords('東華大學通識中心陳文盛老師115-1課程')
+    assert '115-1' in kws and '陳文' in kws and '課程' in kws
+    assert '11' not in kws and '15' not in kws and '5-' not in kws
+
+
+def test_extract_returns_full_page_when_it_fits():
+    lines = ['標題', '人工智慧概論', '和AI一起寫程式']
+    assert extract_relevant_text(lines, '陳文盛 課程', max_chars=100) == '\n'.join(lines)
+
+
+def test_extract_prefers_short_list_items_over_long_paragraphs():
+    """課程清單 (短行、未命中關鍵字) 應優先於命中關鍵字的長公告之外的長段落"""
+    lines = (
+        ['陳文盛 115-1 課程入口']
+        + ['人工智慧概論', '資訊科技與應用', '創客入門–智慧生活裝置實作', '和AI一起寫程式：創意生活應用']
+        + ['公告 ' + '很長的公告內容' * 30 for _ in range(5)]
+    )
+    excerpt = extract_relevant_text(lines, '陳文盛老師115-1課程', max_chars=300)
+    for name in ['人工智慧概論', '資訊科技與應用', '創客入門–智慧生活裝置實作', '和AI一起寫程式：創意生活應用']:
+        assert name in excerpt
+    assert len(excerpt) <= 300
+
+
 def test_extract_without_matches_returns_beginning():
     excerpt = extract_relevant_text(['第一行', '第二行'], '完全不相關', max_chars=100)
     assert excerpt.startswith('第一行')
