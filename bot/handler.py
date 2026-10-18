@@ -436,7 +436,7 @@ class BotHandler:
             logger.exception('Ollama 連線失敗')
             refund_quota(user_id)
             await self.send_error(
-                update, '無法連線到本地模型，請確認 Ollama 已啟動 (<code>ollama serve</code>)。'
+                update, '無法連線到本地模型，請確認 Ollama 已啟動 (macOS：<code>open -a Ollama</code>)。'
             )
         except Exception:
             logger.exception('處理查詢失敗')

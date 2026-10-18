@@ -20,11 +20,14 @@
 ### 1. 安裝 Ollama 並拉取模型
 
 ```bash
-# 安裝 Ollama (Mac/Windows/Linux)
-curl -fsSL https://ollama.com/install.sh | sh
+# 安裝 Ollama (macOS 建議用 Homebrew 安裝桌面版，登入後自動常駐)
+brew install --cask ollama
+open -a Ollama
 
-# 啟動 Ollama 服務
-ollama serve
+# 確認服務 (應回傳 Ollama is running)
+curl http://127.0.0.1:11434
+
+# Linux 可改用官方腳本：curl -fsSL https://ollama.com/install.sh | sh && ollama serve
 
 # 拉取支援 Function Calling 的模型 (任選一)
 ollama pull llama3.1        # 推薦：Meta 官方，支援工具呼叫
@@ -237,7 +240,7 @@ A:
 
 ### Q: 回覆很慢？
 A: 
-- 確認使用 GPU 加速：`OLLAMA_BASE_URL=http://localhost:11434` (預設會自動偵測 GPU)
+- 確認使用 GPU 加速：`OLLAMA_BASE_URL=http://127.0.0.1:11434` (預設會自動偵測 GPU)
 - 使用較小模型：`llama3.2:3b`、`qwen2.5:3b`、`gemma2:2b`
 - 調整 `OLLAMA_TIMEOUT`
 

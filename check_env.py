@@ -72,9 +72,11 @@ def check_ollama():
 
     try:
         # 檢查 Ollama 服務
-        resp = httpx.get('http://localhost:11434/api/tags', timeout=5.0)
+        from config.settings import settings
+
+        resp = httpx.get(f'{settings.OLLAMA_BASE_URL}/api/tags', timeout=5.0)
         if resp.status_code != 200:
-            print('❌ Ollama 服務未運行 (請執行: ollama serve)')
+            print('❌ Ollama 服務未運行 (macOS 請執行: open -a Ollama)')
             return False
 
         models = resp.json().get('models', [])
@@ -102,7 +104,7 @@ def check_ollama():
         return True
 
     except httpx.ConnectError:
-        print('❌ 無法連線到 Ollama (請確認 ollama serve 已啟動)')
+        print('❌ 無法連線到 Ollama (macOS 請執行: open -a Ollama，或確認 OLLAMA_BASE_URL)')
         return False
     except Exception as e:
         print(f'❌ Ollama 檢查失敗: {e}')
@@ -149,7 +151,7 @@ def main():
     print('\n' + '=' * 50)
     if all_pass:
         print('🎉 所有檢查通過！可以啟動 Bot')
-        print('   執行: python -m bot.main')
+        print('   執行: uv run python -m bot.main')
     else:
         print('❌ 部分檢查失敗，請修正後再試')
     print('=' * 50)

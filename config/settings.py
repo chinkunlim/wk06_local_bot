@@ -40,7 +40,7 @@ class Settings:
     INVALID_USER_IDS: list[str] = _invalid_ids
 
     # === Ollama / 本地 LLM 設定 ===
-    OLLAMA_BASE_URL: str = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    OLLAMA_BASE_URL: str = os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
     # 支援 Function Calling 的模型建議：
     # - llama3.1 / llama3.2 (需較新版本 Ollama)
     # - nemotron3-ultra
