@@ -1,6 +1,7 @@
 """
 Ollama Client - 支援 Function Calling / Tool Use
 """
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -71,9 +72,13 @@ class OllamaClient:
         self.model = model or settings.OLLAMA_MODEL
         self.timeout = timeout or settings.OLLAMA_TIMEOUT
         self._client: httpx.AsyncClient | None = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        # 連線池綁定建立時的 event loop；換 loop (如 asyncio.run / 測試) 需重建
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or self._client_loop is not loop:
+            self._client_loop = loop
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
