@@ -102,6 +102,23 @@
   3. 只看搜尋摘要時答案不完整 (例如老師開的課只列出一門) → 讀取網頁內文
   4. 8B 小模型心算不穩 (123 × 456 偶爾算錯) → **尚未解決** (KNOWN_ISSUES.md ISSUE-020)
 
+### 執行畫面
+用老師指南的三題測試：打招呼、常識題 (台灣最高的山)、最近的事 (2026 年諾貝爾物理獎)。
+
+**關卡 A：模擬模式** (`uv run python -m bot.main --simulate`)
+
+前兩題判斷不需搜尋，直接由本機模型回答 (3 秒、2 秒)；第三題判斷需要搜尋，查 DuckDuckGo、讀 2 個網頁後回答並附來源 (11 秒)。
+
+<img src="docs/images/simulate-terminal.png" alt="模擬模式：終端機問答畫面" width="600">
+
+**關卡 B：真的接 Telegram** (`uv run python -m bot.main`)
+
+同樣三題在手機上的回覆；頂端的「typing」是處理中的「正在輸入…」狀態，每則回覆尾巴有模型名稱與秒數。
+
+<img src="docs/images/telegram-chat.png" alt="Telegram 對話畫面" width="360">
+
+> 搜尋題的答案來自網頁內容，模型不會自行查證；8B 小模型也可能答錯，請自行核對。
+
 ## ✨ 特色
 
 - 🏠 **100% 本地運行** - 無需雲端 API Key，資料不出本機
